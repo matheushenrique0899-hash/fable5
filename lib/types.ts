@@ -28,7 +28,7 @@ export interface Charge {
   description: string | null;
   paid_at: string | null;
   created_at: string;
-  clients?: Pick<Client, "name" | "document"> | null;
+  clients?: { name: string; document: string; phone?: string | null } | null;
 }
 
 export interface Negotiation {

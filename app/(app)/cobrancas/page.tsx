@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Receipt, Plus, CheckCircle2, Trash2, Pencil, Handshake, Upload, Download } from "lucide-react";
 import {
   listCharges,
@@ -60,6 +61,7 @@ const emptyForm = {
 };
 
 export default function CobrancasPage() {
+  const router = useRouter();
   const [charges, setCharges] = useState<Charge[]>([]);
   const [clients, setClients] = useState<{ id: string; name: string }[]>([]);
   const [filter, setFilter] = useState<Filter>("todas");
@@ -98,6 +100,15 @@ export default function CobrancasPage() {
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { listAllClientsLite().then(setClients); }, []);
+
+  // Deep link vindo do Dashboard: /cobrancas?status=atrasado&aging=d90p
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const st = params.get("status");
+    if (st && ["pendente", "atrasado", "pago"].includes(st)) setFilter(st as Filter);
+    const ag = params.get("aging");
+    if (ag && ["d30", "d60", "d90", "d90p"].includes(ag)) setAgingFilter(ag as AgingFilter);
+  }, []);
 
   useEffect(() => {
     if (!toast) return;
@@ -189,16 +200,17 @@ return () => clearTimeout(t);
 
   async function handleCreateNegotiation(c: Charge) {
     try {
-      const res = await ensureNegotiationForClient(c.client_id);
-      setToast(
-        res === "criada"
-          ? `Negociação criada para ${c.clients?.name ?? "o cliente"}.`
-          : `${c.clients?.name ?? "O cliente"} já tem uma negociação ativa.`
-      );
+      await ensureNegotiationForClient(c.client_id);
+      // Leva direto para a aba Negociação, onde a tratativa aparece no topo
+      router.push("/negociacao");
     } catch (e) {
-      setToast(e instanceof Error ? e.message : "Erro ao criar negociação.");
+      setToast(
+        "Erro ao criar negociação: " +
+          (e instanceof Error ? e.message : "erro desconhecido")
+      );
     }
   }
+
 
   function resetImport() {
     setPreview(null);

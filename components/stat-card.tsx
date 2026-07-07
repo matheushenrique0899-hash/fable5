@@ -1,22 +1,19 @@
 import { type ReactNode } from "react";
-import { Card } from "@/components/ui/card";
+import Link from "next/link";
 import { cn } from "@/lib/utils";
 
-export function StatCard({
-  label,
-  value,
-  hint,
-  icon,
-  tone = "default",
-}: {
+interface StatCardProps {
   label: string;
   value: string;
   hint?: string;
   icon: ReactNode;
   tone?: "default" | "accent" | "warn" | "danger";
-}) {
-  return (
-    <Card className="p-5">
+  href?: string;
+}
+
+export function StatCard({ label, value, hint, icon, tone = "default", href }: StatCardProps) {
+  const inner = (
+    <>
       <div className="flex items-start justify-between">
         <p className="text-xs font-medium uppercase tracking-wide text-faint">{label}</p>
         <span
@@ -33,6 +30,20 @@ export function StatCard({
       </div>
       <p className="mt-3 font-mono text-2xl font-semibold tracking-tight text-fg">{value}</p>
       {hint && <p className="mt-1 text-xs text-muted">{hint}</p>}
-    </Card>
+    </>
   );
+
+  const base = "block rounded-lg border border-border bg-surface p-5 shadow-card";
+
+  if (href) {
+    return (
+      <Link
+        href={href}
+        className={cn(base, "transition-colors hover:border-border-strong hover:bg-raised/40")}
+      >
+        {inner}
+      </Link>
+    );
+  }
+  return <div className={base}>{inner}</div>;
 }

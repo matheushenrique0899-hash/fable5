@@ -1,14 +1,17 @@
 import { createClient } from "@/lib/supabase/client";
+import { computeAging, type AgingBucket } from "@/lib/services/charges";
 import type { Charge } from "@/lib/types";
 
 export interface DashboardData {
-  totalClients: number;
-  openAmount: number;
   overdueAmount: number;
+  overdueCount: number;
   receivedThisMonth: number;
+  recoveryRate: number | null; // null = sem base de cálculo no mês
   activeNegotiations: number;
+  negotiationsOpenValue: number;
+  aging: AgingBucket[];
   monthlySeries: { label: string; value: number }[];
-  recentCharges: Charge[];
+  priorities: Charge[];
 }
 
 export async function getDashboardData(): Promise<DashboardData> {
@@ -16,23 +19,66 @@ export async function getDashboardData(): Promise<DashboardData> {
   await supabase.rpc("refresh_overdue_charges");
 
   const now = new Date();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const monthStartISO = monthStart.toISOString();
+  const monthStartDate = monthStartISO.slice(0, 10);
+  const nextMonthDate = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+    .toISOString()
+    .slice(0, 10);
   const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1).toISOString();
 
-  const [clientsRes, openRes, paidRes, negotiationsRes, recentRes] = await Promise.all([
-    supabase.from("clients").select("id", { count: "exact", head: true }),
-    supabase.from("charges").select("amount, status").in("status", ["pendente", "atrasado"]),
-    supabase.from("charges").select("amount, paid_at").eq("status", "pago").gte("paid_at", sixMonthsAgo),
+  const [openRes, paidRes, negRes, prioritiesRes] = await Promise.all([
+    supabase
+      .from("charges")
+      .select("amount, status, due_date, client_id")
+      .in("status", ["pendente", "atrasado"]),
+    supabase
+      .from("charges")
+      .select("amount, paid_at")
+      .eq("status", "pago")
+      .gte("paid_at", sixMonthsAgo),
     supabase
       .from("negotiations")
-      .select("id", { count: "exact", head: true })
+      .select("client_id")
       .in("status", ["em_negociacao", "aguardando_retorno"]),
-    supabase.from("charges").select("*, clients(name, document)").order("created_at", { ascending: false }).limit(5),
+    supabase
+      .from("charges")
+      .select("*, clients(name, document, phone)")
+      .eq("status", "atrasado")
+      .order("due_date", { ascending: true })
+      .limit(5),
   ]);
 
   const open = openRes.data ?? [];
   const paid = paidRes.data ?? [];
+  const negotiations = negRes.data ?? [];
 
+  // Em atraso
+  const overdue = open.filter((c) => c.status === "atrasado");
+  const overdueAmount = overdue.reduce((s, c) => s + Number(c.amount), 0);
+
+  // Recebido no mês
+  const receivedThisMonth = paid
+    .filter((c) => c.paid_at && c.paid_at >= monthStartISO)
+    .reduce((s, c) => s + Number(c.amount), 0);
+
+  // Taxa de recuperação: recebido no mês ÷ (recebido + vencido não pago no mês)
+  const dueUnpaidThisMonth = open
+    .filter((c) => c.due_date >= monthStartDate && c.due_date < nextMonthDate)
+    .reduce((s, c) => s + Number(c.amount), 0);
+  const denom = receivedThisMonth + dueUnpaidThisMonth;
+  const recoveryRate = denom > 0 ? Math.round((receivedThisMonth / denom) * 100) : null;
+
+  // Em negociação: qtd + valor em aberto dos clientes em tratativa
+  const negClientIds = new Set(negotiations.map((n) => n.client_id));
+  const negotiationsOpenValue = open
+    .filter((c) => negClientIds.has(c.client_id))
+    .reduce((s, c) => s + Number(c.amount), 0);
+
+  // Aging da carteira (mesmos buckets da aba Negociação)
+  const aging = computeAging(open as Charge[]);
+
+  // Série mensal de recebidos
   const monthlySeries: { label: string; value: number }[] = [];
   for (let i = 5; i >= 0; i--) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
@@ -48,14 +94,14 @@ export async function getDashboardData(): Promise<DashboardData> {
   }
 
   return {
-    totalClients: clientsRes.count ?? 0,
-    openAmount: open.reduce((s, c) => s + Number(c.amount), 0),
-    overdueAmount: open.filter((c) => c.status === "atrasado").reduce((s, c) => s + Number(c.amount), 0),
-    receivedThisMonth: paid
-      .filter((c) => c.paid_at && c.paid_at >= monthStart)
-      .reduce((s, c) => s + Number(c.amount), 0),
-    activeNegotiations: negotiationsRes.count ?? 0,
+    overdueAmount,
+    overdueCount: overdue.length,
+    receivedThisMonth,
+    recoveryRate,
+    activeNegotiations: negotiations.length,
+    negotiationsOpenValue,
+    aging,
     monthlySeries,
-    recentCharges: (recentRes.data ?? []) as Charge[],
+    priorities: (prioritiesRes.data ?? []) as Charge[],
   };
 }
