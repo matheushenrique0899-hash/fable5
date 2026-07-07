@@ -8,6 +8,7 @@ import {
   updateClientRecord,
   deleteClientRecord,
   parseClientsCSV,
+  readCsvFile,
   importClients,
   CSV_TEMPLATE,
   type ImportResult,
@@ -115,7 +116,7 @@ export default function ClientesPage() {
     setImportResult(null);
     setImporting(true);
     try {
-      const text = await file.text();
+      const text = await readCsvFile(file);
       const { rows, invalid } = parseClientsCSV(text);
       if (rows.length === 0) {
         setImportError(

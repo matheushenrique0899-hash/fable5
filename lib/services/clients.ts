@@ -79,6 +79,17 @@ export async function deleteClientRecord(id: string) {
 }
 
 // ---------- Importação em massa (CSV) ----------
+
+// Excel no Windows salva CSV como Windows-1252/ANSI, não UTF-8.
+// Lê como UTF-8 primeiro; se aparecer o caractere de substituição (�),
+// refaz a leitura como Windows-1252.
+export async function readCsvFile(file: File): Promise<string> {
+  const buffer = await file.arrayBuffer();
+  const utf8Text = new TextDecoder("utf-8").decode(buffer);
+  if (!utf8Text.includes("\uFFFD")) return utf8Text;
+  return new TextDecoder("windows-1252").decode(buffer);
+}
+
 export interface ImportRow {
   name: string;
   document: string;

@@ -14,6 +14,25 @@ export interface ImportNegResult {
   errors: string[];
 }
 
+// Remove acentos para comparar cabeçalhos sem depender de codificação
+function normalize(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+// Excel no Windows salva CSV como Windows-1252/ANSI, não UTF-8.
+// Lê como UTF-8 primeiro; se aparecer o caractere de substituição (�),
+// refaz a leitura como Windows-1252.
+export async function readCsvFile(file: File): Promise<string> {
+  const buffer = await file.arrayBuffer();
+  const utf8Text = new TextDecoder("utf-8").decode(buffer);
+  if (!utf8Text.includes("\uFFFD")) return utf8Text;
+  return new TextDecoder("windows-1252").decode(buffer);
+}
+
 function parseDate(raw: string | undefined): Date | null {
   if (!raw) return null;
   const parts = raw.trim().split(/[\/\-]/);
@@ -35,8 +54,8 @@ export function parseNegotiationsCSV(text: string): {
   const errors: string[] = [];
   if (lines.length < 2) return { rows: [], errors: ["Arquivo vazio."] };
 
-  const header = lines[0].split(sep).map((h) => h.replace(/^"|"$/g, "").trim().toLowerCase());
-  const iCode = header.findIndex((h) => h.includes("código") || h === "codigo" || h === "code");
+  const header = lines[0].split(sep).map((h) => normalize(h.replace(/^"|"$/g, "")));
+  const iCode = header.findIndex((h) => h.includes("codigo") || h === "code");
   const iName = header.findIndex((h) => h.includes("nome") || h === "name");
   const iTotal = header.findIndex((h) => h.includes("total") || h.includes("receber") || h.includes("saldo"));
   const iSale = header.findIndex((h) => h.includes("venda") || h === "sale");
@@ -103,7 +122,6 @@ export async function importNegotiations(rows: ImportNegRow[]): Promise<ImportNe
     try {
       const docKey = row.code.replace(/\D/g, "").padStart(11, "0").slice(0, 11);
 
-      // 1. Cliente (cria se não existir)
       let clientId: string;
       const { data: existing } = await supabase
         .from("clients")
@@ -124,8 +142,6 @@ export async function importNegotiations(rows: ImportNegRow[]): Promise<ImportNe
         clientId = newClient.id;
       }
 
-      // 2. Cobrança: saldo total, data da venda, vencimento mais antigo.
-      //    Parcelas fica 1 (padrão) — usuário ajusta depois pelo Editar.
       const { error: che } = await supabase.from("charges").insert({
         owner_id: user.id,
         client_id: clientId,

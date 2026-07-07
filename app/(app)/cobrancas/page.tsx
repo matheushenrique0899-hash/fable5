@@ -15,6 +15,7 @@ import { listAllClientsLite } from "@/lib/services/clients";
 import {
   parseNegotiationsCSV,
   importNegotiations,
+  readCsvFile,
   NEG_CSV_TEMPLATE,
   type ImportNegRow,
   type ImportNegResult,
@@ -209,7 +210,7 @@ return () => clearTimeout(t);
   async function handleImportFile(file: File) {
     resetImport();
     try {
-      const text = await file.text();
+      const text = await readCsvFile(file);
       const { rows, errors } = parseNegotiationsCSV(text);
       if (rows.length === 0) {
         setImportError(errors[0] ?? "Nenhuma linha válida encontrada no arquivo.");
