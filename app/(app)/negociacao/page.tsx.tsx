@@ -1,19 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Handshake, Plus, Pencil, Trash2, Upload, Download } from "lucide-react";
+import { Handshake, Plus, Pencil, Trash2 } from "lucide-react";
 import {
   listNegotiations,
   createNegotiation,
   updateNegotiation,
   deleteNegotiation,
 } from "@/lib/services/negotiations";
-import {
-  parseNegotiationsCSV,
-  importNegotiations,
-  NEG_CSV_TEMPLATE,
-  type ImportNegResult,
-} from "@/lib/services/import-negotiations";
 import { listCharges, computeAging, refreshOverdue } from "@/lib/services/charges";
 import { listAllClientsLite } from "@/lib/services/clients";
 import type { Negotiation, NegotiationStatus } from "@/lib/types";
@@ -70,10 +64,6 @@ export default function NegociacaoPage() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<Negotiation | null>(null);
-  const [importOpen, setImportOpen] = useState(false);
-  const [importing, setImporting] = useState(false);
-  const [importResult, setImportResult] = useState<ImportNegResult | null>(null);
-  const [importError, setImportError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -155,42 +145,6 @@ export default function NegociacaoPage() {
     await load();
   }
 
-  async function handleImportFile(file: File) {
-    setImportError(null);
-    setImportResult(null);
-    setImporting(true);
-    try {
-      const text = await file.text();
-      const { rows, errors } = parseNegotiationsCSV(text);
-      if (rows.length === 0) {
-        setImportError(
-          errors.length > 0
-            ? errors[0]
-            : "Nenhuma linha válida encontrada no arquivo."
-        );
-        return;
-      }
-      const result = await importNegotiations(rows);
-      result.errors = [...errors, ...result.errors];
-      setImportResult(result);
-      await load();
-    } catch (e) {
-      setImportError(e instanceof Error ? e.message : "Erro ao importar.");
-    } finally {
-      setImporting(false);
-    }
-  }
-
-  function downloadNegTemplate() {
-    const blob = new Blob(["\uFEFF" + NEG_CSV_TEMPLATE], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "modelo-importacao-negociacao.csv";
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
   return (
     <div className="space-y-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
@@ -200,17 +154,9 @@ export default function NegociacaoPage() {
             Acompanhamento das tratativas de cobrança com cada cliente.
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button
-            variant="secondary"
-            onClick={() => { setImportResult(null); setImportError(null); setImportOpen(true); }}
-          >
-            <Upload size={15} /> Importar planilha
-          </Button>
-          <Button onClick={openCreate}>
-            <Plus size={15} /> Nova negociação
-          </Button>
-        </div>
+        <Button onClick={openCreate}>
+          <Plus size={15} /> Nova negociação
+        </Button>
       </header>
 
       {/* KPIs: faixas de atraso da carteira em aberto */}
@@ -366,70 +312,6 @@ export default function NegociacaoPage() {
           </Table>
         )}
       </Card>
-
-      {/* Importar planilha do ERP */}
-      <Dialog
-        open={importOpen}
-        onClose={() => setImportOpen(false)}
-        title="Importar carteira de cobrança"
-        className="max-w-lg"
-      >
-        <div className="space-y-4">
-          <p className="text-sm text-muted">
-            Exporte do ERP, ajuste os cabeçalhos para{" "}
-            <span className="font-mono text-xs text-fg">Código; Nome; Total; Venda; Vencimento</span>{" "}
-            e salve como CSV. O sistema agrupa por código, soma o saldo, cria uma cobrança
-            com o total e abre a negociação — uma por cliente, automaticamente.
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <Button variant="secondary" size="sm" onClick={downloadNegTemplate}>
-              <Download size={14} /> Baixar modelo
-            </Button>
-            <label className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-md bg-accent px-3 text-xs font-semibold text-[#06231A] transition-colors hover:bg-accent-hover">
-              <Upload size={14} />
-              {importing ? "Importando..." : "Escolher arquivo CSV"}
-              <input
-                type="file"
-                accept=".csv,text/csv"
-                className="hidden"
-                disabled={importing}
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) handleImportFile(f);
-                  e.target.value = "";
-                }}
-              />
-            </label>
-          </div>
-
-          {importError && (
-            <p className="rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-sm text-danger">
-              {importError}
-            </p>
-          )}
-
-          {importResult && (
-            <div className="space-y-1.5 rounded-md border border-border bg-bg px-3 py-2.5 text-sm">
-              <p className="text-accent">
-                {importResult.created} {importResult.created === 1 ? "negociação criada" : "negociações criadas"}
-              </p>
-              {importResult.skipped > 0 && (
-                <p className="text-warn">{importResult.skipped} ignorada(s) por erro</p>
-              )}
-              {importResult.errors.slice(0, 3).map((e, i) => (
-                <p key={i} className="font-mono text-xs text-danger">{e}</p>
-              ))}
-              {importResult.errors.length > 3 && (
-                <p className="text-xs text-faint">+{importResult.errors.length - 3} outros erros</p>
-              )}
-            </div>
-          )}
-
-          <div className="flex justify-end pt-1">
-            <Button variant="secondary" onClick={() => setImportOpen(false)}>Fechar</Button>
-          </div>
-        </div>
-      </Dialog>
 
       {/* Criar / editar */}
       <Dialog

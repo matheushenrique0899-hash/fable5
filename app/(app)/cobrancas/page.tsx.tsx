@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Receipt, Plus, CheckCircle2, Trash2, Pencil, Handshake } from "lucide-react";
+import { Receipt, Plus, CheckCircle2, Trash2, Pencil, Handshake, Upload, Download } from "lucide-react";
 import {
   listCharges,
   createCharge,
@@ -12,6 +12,13 @@ import {
   ensureNegotiationForClient,
 } from "@/lib/services/charges";
 import { listAllClientsLite } from "@/lib/services/clients";
+import {
+  parseNegotiationsCSV,
+  importNegotiations,
+  NEG_CSV_TEMPLATE,
+  type ImportNegRow,
+  type ImportNegResult,
+} from "@/lib/services/import-negotiations";
 import type { Charge, ChargeStatus } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -70,6 +77,14 @@ export default function CobrancasPage() {
 
   const [toast, setToast] = useState<string | null>(null);
 
+  // Importação CSV com preview
+  const [importOpen, setImportOpen] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [preview, setPreview] = useState<ImportNegRow[] | null>(null);
+  const [previewErrors, setPreviewErrors] = useState<string[]>([]);
+  const [importResult, setImportResult] = useState<ImportNegResult | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -86,7 +101,7 @@ export default function CobrancasPage() {
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(null), 2800);
-    return () => clearTimeout(t);
+return () => clearTimeout(t);
   }, [toast]);
 
   const visible = charges.filter((c) => {
@@ -182,6 +197,56 @@ export default function CobrancasPage() {
     } catch (e) {
       setToast(e instanceof Error ? e.message : "Erro ao criar negocia\u00e7\u00e3o.");
     }
+  }
+
+  function resetImport() {
+    setPreview(null);
+    setPreviewErrors([]);
+    setImportResult(null);
+    setImportError(null);
+  }
+
+  async function handleImportFile(file: File) {
+    resetImport();
+    try {
+      const text = await file.text();
+      const { rows, errors } = parseNegotiationsCSV(text);
+      if (rows.length === 0) {
+        setImportError(errors[0] ?? "Nenhuma linha válida encontrada no arquivo.");
+        return;
+      }
+      setPreview(rows);
+      setPreviewErrors(errors);
+    } catch (e) {
+      setImportError(e instanceof Error ? e.message : "Erro ao ler o arquivo.");
+    }
+  }
+
+  async function confirmImport() {
+    if (!preview) return;
+    setImporting(true);
+    try {
+      const result = await importNegotiations(preview);
+      result.errors = [...previewErrors, ...result.errors];
+      setImportResult(result);
+      setPreview(null);
+      setToast(`${result.created} cobrança(s) importada(s).`);
+      await load();
+    } catch (e) {
+      setImportError(e instanceof Error ? e.message : "Erro ao importar.");
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  function downloadNegTemplate() {
+    const blob = new Blob(["\uFEFF" + NEG_CSV_TEMPLATE], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "modelo-importacao-cobrancas.csv";
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   return (
@@ -330,6 +395,124 @@ export default function CobrancasPage() {
           {toast}
         </div>
       )}
+
+      {/* Importar planilha do ERP (com preview) */}
+      <Dialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        title="Importar carteira de cobrança"
+        className="max-w-2xl"
+      >
+        <div className="space-y-4">
+          {!preview && !importResult && (
+            <>
+              <p className="text-sm text-muted">
+                Exporte do ERP, ajuste os cabeçalhos para{" "}
+                <span className="font-mono text-xs text-fg">Código; Nome; Total; Venda; Vencimento</span>{" "}
+                e salve como CSV. O sistema agrupa por código, soma o saldo devedor e cria o
+                cliente + a cobrança. Parcelas e negociação você define depois, linha a linha.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="secondary" size="sm" onClick={downloadNegTemplate}>
+                  <Download size={14} /> Baixar modelo
+                </Button>
+                <label className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-md bg-accent px-3 text-xs font-semibold text-[#06231A] transition-colors hover:bg-accent-hover">
+                  <Upload size={14} />
+                  Escolher arquivo CSV
+                  <input
+                    type="file"
+                    accept=".csv,text/csv"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) handleImportFile(f);
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+              </div>
+            </>
+          )}
+
+          {importError && (
+            <p className="rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-sm text-danger">
+              {importError}
+            </p>
+          )}
+
+          {/* PREVIEW antes de confirmar */}
+          {preview && (
+            <>
+              <div className="flex items-baseline justify-between">
+                <p className="text-sm font-medium text-fg">
+                  Prévia: {preview.length} {preview.length === 1 ? "cliente" : "clientes"}
+                </p>
+                <p className="font-mono text-sm text-accent">
+                  {formatBRL(preview.reduce((s, r) => s + r.total, 0))}
+                </p>
+              </div>
+              <div className="max-h-64 overflow-y-auto rounded-md border border-border">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 border-b border-border bg-surface">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-medium uppercase tracking-wide text-faint">Cód.</th>
+                      <th className="px-3 py-2 text-left font-medium uppercase tracking-wide text-faint">Nome</th>
+                      <th className="px-3 py-2 text-right font-medium uppercase tracking-wide text-faint">Total</th>
+                      <th className="px-3 py-2 text-left font-medium uppercase tracking-wide text-faint">Venda</th>
+                      <th className="px-3 py-2 text-left font-medium uppercase tracking-wide text-faint">Venc.</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/60">
+                    {preview.map((r) => (
+                      <tr key={r.code}>
+                        <td className="px-3 py-2 font-mono text-muted">{r.code}</td>
+                        <td className="px-3 py-2 text-fg">{r.name}</td>
+                        <td className="px-3 py-2 text-right font-mono text-fg">{formatBRL(r.total)}</td>
+                        <td className="px-3 py-2 font-mono text-muted">{formatDate(r.sale_date)}</td>
+                        <td className="px-3 py-2 font-mono text-muted">{formatDate(r.oldest_due)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {previewErrors.length > 0 && (
+                <p className="text-xs text-warn">
+                  {previewErrors.length} linha(s) serão ignoradas — ex.: {previewErrors[0]}
+                </p>
+              )}
+              <div className="flex justify-end gap-2 pt-1">
+                <Button variant="secondary" onClick={resetImport}>Escolher outro arquivo</Button>
+                <Button onClick={confirmImport} disabled={importing}>
+                  {importing ? "Importando..." : `Confirmar importação (${preview.length})`}
+                </Button>
+              </div>
+            </>
+          )}
+
+          {/* Resultado */}
+          {importResult && (
+            <>
+              <div className="space-y-1.5 rounded-md border border-border bg-bg px-3 py-2.5 text-sm">
+                <p className="text-accent">
+                  {importResult.created} {importResult.created === 1 ? "cobrança criada" : "cobranças criadas"}
+                </p>
+                {importResult.skipped > 0 && (
+                  <p className="text-warn">{importResult.skipped} ignorada(s) por erro</p>
+                )}
+                {importResult.errors.slice(0, 3).map((e, i) => (
+                  <p key={i} className="font-mono text-xs text-danger">{e}</p>
+                ))}
+                {importResult.errors.length > 3 && (
+                  <p className="text-xs text-faint">+{importResult.errors.length - 3} outros erros</p>
+                )}
+              </div>
+              <div className="flex justify-end pt-1">
+                <Button variant="secondary" onClick={() => setImportOpen(false)}>Fechar</Button>
+              </div>
+            </>
+          )}
+        </div>
+      </Dialog>
 
       <Dialog
         open={dialogOpen}

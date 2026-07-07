@@ -77,8 +77,8 @@ export function parseNegotiationsCSV(text: string): {
     }
   });
 
-  const rows: ImportNegRow[] = Array.from(map.values()).map((v, idx) => ({
-    code: Array.from(map.keys())[idx],
+  const rows: ImportNegRow[] = Array.from(map.entries()).map(([code, v]) => ({
+    code,
     name: v.name,
     total: Math.round(v.total * 100) / 100,
     sale_date: v.sale.toISOString().slice(0, 10),
@@ -88,6 +88,8 @@ export function parseNegotiationsCSV(text: string): {
   return { rows, errors };
 }
 
+// Importa: cria cliente (se não existir) + cobrança com o saldo total.
+// A negociação NÃO é criada aqui — nasce do botão "Iniciar negociação" na cobrança.
 export async function importNegotiations(rows: ImportNegRow[]): Promise<ImportNegResult> {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -122,7 +124,8 @@ export async function importNegotiations(rows: ImportNegRow[]): Promise<ImportNe
         clientId = newClient.id;
       }
 
-      // 2. Cobrança com o saldo total, data da venda e vencimento mais antigo
+      // 2. Cobrança: saldo total, data da venda, vencimento mais antigo.
+      //    Parcelas fica 1 (padrão) — usuário ajusta depois pelo Editar.
       const { error: che } = await supabase.from("charges").insert({
         owner_id: user.id,
         client_id: clientId,
@@ -133,14 +136,6 @@ export async function importNegotiations(rows: ImportNegRow[]): Promise<ImportNe
         description: `Saldo devedor importado (c\u00f3d. ${row.code})`,
       });
       if (che) { errors.push(`${row.name}: cobran\u00e7a (${che.message})`); skipped++; continue; }
-
-      // 3. Negociação vinculada
-      const { error: ne } = await supabase.from("negotiations").insert({
-        owner_id: user.id,
-        client_id: clientId,
-        status: "em_negociacao",
-      });
-      if (ne) { errors.push(`${row.name}: negocia\u00e7\u00e3o (${ne.message})`); skipped++; continue; }
 
       created++;
     } catch (e) {
