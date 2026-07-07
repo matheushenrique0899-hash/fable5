@@ -101,7 +101,7 @@ export default function CobrancasPage() {
 
   useEffect(() => {
     if (!toast) return;
-    const t = setTimeout(() => setToast(null), 2800);
+    const t = setTimeout(() => setToast(null), 5000);
 return () => clearTimeout(t);
   }, [toast]);
 

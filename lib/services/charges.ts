@@ -78,15 +78,16 @@ export async function ensureNegotiationForClient(clientId: string): Promise<"cri
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Sessão expirada. Faça login novamente.");
 
-  const { data: existing } = await supabase
+  const { data: existing, error: selectErr } = await supabase
     .from("negotiations")
     .select("id")
     .eq("owner_id", user.id)
     .eq("client_id", clientId)
     .in("status", ["em_negociacao", "aguardando_retorno"])
-    .maybeSingle();
+    .limit(1);
 
-  if (existing) return "existente";
+  if (selectErr) throw selectErr;
+  if (existing && existing.length > 0) return "existente";
 
   const { error } = await supabase.from("negotiations").insert({
     owner_id: user.id,
