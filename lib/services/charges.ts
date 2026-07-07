@@ -41,13 +41,60 @@ export async function createCharge(input: {
   if (error) throw error;
 }
 
-export async function markAsPaid(id: string) {
+export async function markAsPaid(id: string, paidDate?: string) {
   const supabase = createClient();
+  // paidDate vem como YYYY-MM-DD; guarda ao meio-dia para evitar troca de fuso
+  const paid_at = paidDate
+    ? new Date(paidDate + "T12:00:00").toISOString()
+    : new Date().toISOString();
   const { error } = await supabase
     .from("charges")
-    .update({ status: "pago", paid_at: new Date().toISOString() })
+    .update({ status: "pago", paid_at })
     .eq("id", id);
   if (error) throw error;
+}
+
+export async function updateCharge(id: string, input: {
+  amount: number;
+  due_date: string;
+  sale_date?: string;
+  installments?: number;
+  description?: string;
+}) {
+  const supabase = createClient();
+  const { error } = await supabase.from("charges").update({
+    amount: input.amount,
+    due_date: input.due_date,
+    sale_date: input.sale_date || null,
+    installments: input.installments ?? 1,
+    description: input.description?.trim() || null,
+  }).eq("id", id);
+  if (error) throw error;
+}
+
+// Cria uma negociação para o cliente da cobrança, se ainda não houver uma ativa
+export async function ensureNegotiationForClient(clientId: string): Promise<"criada" | "existente"> {
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Sessão expirada. Faça login novamente.");
+
+  const { data: existing } = await supabase
+    .from("negotiations")
+    .select("id")
+    .eq("owner_id", user.id)
+    .eq("client_id", clientId)
+    .in("status", ["em_negociacao", "aguardando_retorno"])
+    .maybeSingle();
+
+  if (existing) return "existente";
+
+  const { error } = await supabase.from("negotiations").insert({
+    owner_id: user.id,
+    client_id: clientId,
+    status: "em_negociacao",
+  });
+  if (error) throw error;
+  return "criada";
 }
 
 export async function deleteCharge(id: string) {
