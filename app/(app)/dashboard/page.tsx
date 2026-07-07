@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   Receipt,
   TrendingUp,
+  Users,
   Handshake,
   AlertTriangle,
   ArrowRight,
@@ -15,7 +16,6 @@ import {
 import { getDashboardData, type DashboardData } from "@/lib/services/dashboard";
 import { markAsPaid } from "@/lib/services/charges";
 import { StatCard } from "@/components/stat-card";
-import { BarChart } from "@/components/bar-chart";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
@@ -138,26 +138,46 @@ export default function DashboardPage() {
           </Card>
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
-            {/* Recebidos por mês */}
+            {/* Funil de inadimplência */}
             <Card className="lg:col-span-2">
               <CardHeader>
-                <CardTitle>Recebidos por mês</CardTitle>
-                <span className="font-mono text-xs text-faint">últimos 6 meses</span>
+                <CardTitle>Funil de inadimplência</CardTitle>
+                <span className="font-mono text-xs text-faint">por clientes</span>
               </CardHeader>
-              {data.monthlySeries.every((m) => m.value === 0) ? (
+              {data.clientsTotal === 0 ? (
                 <EmptyState
-                  icon={<TrendingUp size={18} />}
-                  title="Nenhum recebimento"
-                  description="Nenhum pagamento registrado nos últimos 6 meses."
+                  icon={<Users size={18} />}
+                  title="Sem clientes"
+                  description="Cadastre clientes para ver o funil."
                   action={
-                    <Link href="/cobrancas">
-                      <Button size="sm">Registrar cobrança</Button>
+                    <Link href="/clientes">
+                      <Button size="sm">Cadastrar clientes</Button>
                     </Link>
                   }
                 />
               ) : (
-                <CardContent>
-                  <BarChart data={data.monthlySeries} />
+                <CardContent className="space-y-3">
+                  {data.funnel.map((stage) => (
+                    <Link key={stage.label} href={stage.href} className="group block">
+                      <div className="mb-1 flex items-baseline justify-between text-xs">
+                        <span className="text-muted transition-colors group-hover:text-fg">
+                          {stage.label}
+                        </span>
+                        <span className="font-mono text-faint">
+                          {stage.count} · {stage.pct}%
+                        </span>
+                      </div>
+                      <div className="h-5 overflow-hidden rounded bg-raised">
+                        <div
+                          className="h-full rounded transition-all group-hover:opacity-80"
+                          style={{
+                            width: `${Math.max(stage.pct, stage.count > 0 ? 3 : 0)}%`,
+                            backgroundColor: stage.color,
+                          }}
+                        />
+                      </div>
+                    </Link>
+                  ))}
                 </CardContent>
               )}
             </Card>

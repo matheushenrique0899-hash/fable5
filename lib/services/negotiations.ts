@@ -55,3 +55,14 @@ export async function deleteNegotiation(id: string) {
   const { error } = await supabase.from("negotiations").delete().eq("id", id);
   if (error) throw error;
 }
+
+// IDs dos clientes com negociação ativa (para o indicador na aba Cobranças)
+export async function listActiveNegotiationClientIds(): Promise<Set<string>> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("negotiations")
+    .select("client_id")
+    .in("status", ["em_negociacao", "aguardando_retorno"]);
+  if (error) throw error;
+  return new Set((data ?? []).map((n) => n.client_id));
+}

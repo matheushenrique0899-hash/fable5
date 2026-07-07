@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Handshake, Plus, Pencil, Trash2 } from "lucide-react";
+import { Handshake, Pencil, Trash2 } from "lucide-react";
 import {
   listNegotiations,
   createNegotiation,
@@ -94,13 +94,6 @@ export default function NegociacaoPage() {
     });
   }, [all]);
 
-  function openCreate() {
-    setEditing(null);
-    setForm(emptyForm);
-    setFormError(null);
-    setDialogOpen(true);
-  }
-
   function openEdit(n: Negotiation) {
     setEditing(n);
     setForm({
@@ -154,9 +147,6 @@ export default function NegociacaoPage() {
             Acompanhamento das tratativas de cobrança com cada cliente.
           </p>
         </div>
-        <Button onClick={openCreate}>
-          <Plus size={15} /> Nova negociação
-        </Button>
       </header>
 
       {/* KPIs: faixas de atraso da carteira em aberto */}

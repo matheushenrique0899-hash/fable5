@@ -13,6 +13,8 @@ import {
   ensureNegotiationForClient,
 } from "@/lib/services/charges";
 import { listAllClientsLite } from "@/lib/services/clients";
+import { listActiveNegotiationClientIds } from "@/lib/services/negotiations";
+import Link from "next/link";
 import {
   parseNegotiationsCSV,
   importNegotiations,
@@ -79,6 +81,7 @@ export default function CobrancasPage() {
   const [payDate, setPayDate] = useState("");
 
   const [toast, setToast] = useState<string | null>(null);
+  const [negotiatingIds, setNegotiatingIds] = useState<Set<string>>(new Set());
 
   // Importação CSV com preview
   const [importOpen, setImportOpen] = useState(false);
@@ -92,7 +95,12 @@ export default function CobrancasPage() {
     setLoading(true);
     try {
       await refreshOverdue();
-      setCharges(await listCharges(filter));
+      const [chargesData, negIds] = await Promise.all([
+        listCharges(filter),
+        listActiveNegotiationClientIds(),
+      ]);
+      setCharges(chargesData);
+      setNegotiatingIds(negIds);
     } finally {
       setLoading(false);
     }
@@ -349,7 +357,21 @@ return () => clearTimeout(t);
                 const overdue = c.status === "atrasado" ? daysOverdue(c.due_date) : 0;
                 return (
                   <TR key={c.id}>
-                    <TD className="font-medium">{c.clients?.name ?? "—"}</TD>
+                    <TD>
+                      <span className="flex items-center gap-2">
+                        <span className="font-medium">{c.clients?.name ?? "—"}</span>
+                        {negotiatingIds.has(c.client_id) && (
+                          <Link
+                            href="/negociacao"
+                            title="Em negociação — ver na aba Negociação"
+                            className="inline-flex items-center gap-1 rounded-full border border-warn/25 bg-warn-soft px-2 py-0.5 text-[10px] font-medium text-warn transition-colors hover:border-warn/50"
+                          >
+                            <Handshake size={11} />
+                            Em negociação
+                          </Link>
+                        )}
+                      </span>
+                    </TD>
                     <TD className="font-mono">{formatBRL(Number(c.amount))}</TD>
                     <TD className="hidden text-muted lg:table-cell">
                       {c.sale_date ? formatDate(c.sale_date) : "—"}
