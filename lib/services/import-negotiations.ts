@@ -36,7 +36,7 @@ export function parseNegotiationsCSV(text: string): {
   if (lines.length < 2) return { rows: [], errors: ["Arquivo vazio."] };
 
   const header = lines[0].split(sep).map((h) => h.replace(/^"|"$/g, "").trim().toLowerCase());
-  const iCode = header.findIndex((h) => h.includes("c\u00f3digo") || h === "codigo" || h === "code");
+  const iCode = header.findIndex((h) => h.includes("código") || h === "codigo" || h === "code");
   const iName = header.findIndex((h) => h.includes("nome") || h === "name");
   const iTotal = header.findIndex((h) => h.includes("total") || h.includes("receber") || h.includes("saldo"));
   const iSale = header.findIndex((h) => h.includes("venda") || h === "sale");
@@ -44,7 +44,7 @@ export function parseNegotiationsCSV(text: string): {
 
   if (iCode === -1 || iName === -1 || iTotal === -1 || iSale === -1 || iDue === -1) {
     errors.push(
-      `Cabe\u00e7alho n\u00e3o reconhecido (${header.join(", ")}). Esperado: C\u00f3digo, Nome, Total, Venda, Vencimento`
+      `Cabeçalho não reconhecido (${header.join(", ")}). Esperado: Código, Nome, Total, Venda, Vencimento`
     );
     return { rows: [], errors };
   }
@@ -57,15 +57,15 @@ export function parseNegotiationsCSV(text: string): {
     const name = cols[iName]?.trim();
     const rawTotal = cols[iTotal]?.replace(/[R$\s.]/g, "").replace(",", ".").trim();
 
-    if (!code || !name) { errors.push(`Linha ${i + 2}: c\u00f3digo ou nome vazio`); return; }
+    if (!code || !name) { errors.push(`Linha ${i + 2}: código ou nome vazio`); return; }
 
     const total = parseFloat(rawTotal ?? "");
-    if (isNaN(total) || total <= 0) { errors.push(`Linha ${i + 2}: valor inv\u00e1lido (${cols[iTotal]})`); return; }
+    if (isNaN(total) || total <= 0) { errors.push(`Linha ${i + 2}: valor inválido (${cols[iTotal]})`); return; }
 
     const sale = parseDate(cols[iSale]);
     const due = parseDate(cols[iDue]);
-    if (!due) { errors.push(`Linha ${i + 2}: vencimento inv\u00e1lido (${cols[iDue]})`); return; }
-    if (!sale) { errors.push(`Linha ${i + 2}: data de venda inv\u00e1lida (${cols[iSale]})`); return; }
+    if (!due) { errors.push(`Linha ${i + 2}: vencimento inválido (${cols[iDue]})`); return; }
+    if (!sale) { errors.push(`Linha ${i + 2}: data de venda inválida (${cols[iSale]})`); return; }
 
     const existing = map.get(code);
     if (existing) {
@@ -133,9 +133,9 @@ export async function importNegotiations(rows: ImportNegRow[]): Promise<ImportNe
         due_date: row.oldest_due,
         sale_date: row.sale_date,
         installments: 1,
-        description: `Saldo devedor importado (c\u00f3d. ${row.code})`,
+        description: `Saldo devedor importado (cód. ${row.code})`,
       });
-      if (che) { errors.push(`${row.name}: cobran\u00e7a (${che.message})`); skipped++; continue; }
+      if (che) { errors.push(`${row.name}: cobrança (${che.message})`); skipped++; continue; }
 
       created++;
     } catch (e) {
@@ -148,6 +148,6 @@ export async function importNegotiations(rows: ImportNegRow[]): Promise<ImportNe
 }
 
 export const NEG_CSV_TEMPLATE =
-  "C\u00f3digo;Nome;Total;Venda;Vencimento\n" +
+  "Código;Nome;Total;Venda;Vencimento\n" +
   "3091;EDIELY FAVETTI LOPES;555,00;10/11/2019;10/12/2019\n" +
   "3266;SIMONE CRISTINA MENEZES;169,85;09/01/2019;09/02/2019\n";
