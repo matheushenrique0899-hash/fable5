@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Receipt, Plus, CheckCircle2, Trash2, Pencil, Handshake, Upload, Download, MessageCircle, FileDown } from "lucide-react";
+import { Receipt, Plus, CheckCircle2, Trash2, Pencil, Handshake, Upload, Download, MessageCircle, FileDown, Search } from "lucide-react";
 import {
   listCharges,
   createCharge,
@@ -71,6 +71,8 @@ export default function CobrancasPage() {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 20;
+  const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState<"oldest" | "newest" | "highest" | "lowest">("oldest");
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Charge | null>(null);
@@ -95,8 +97,8 @@ export default function CobrancasPage() {
   const [importResult, setImportResult] = useState<ImportNegResult | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
 
-  // Reset página quando filtro muda
-  useEffect(() => { setPage(1); }, [filter, agingFilter]);
+  // Reset página quando filtro ou busca muda
+  useEffect(() => { setPage(1); }, [filter, agingFilter, search, sortBy]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -143,8 +145,24 @@ return () => clearTimeout(t);
     .filter((c) => c.status !== "pago")
     .reduce((s, c) => s + Number(c.amount) - (c.paid_total ?? 0), 0);
 
-  const totalPages = Math.max(Math.ceil(visible.length / PAGE_SIZE), 1);
-  const paginated = visible.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  // Busca por nome do cliente (parcial, case-insensitive)
+  const searched = search.trim()
+    ? visible.filter((c) =>
+        (c.clients?.name ?? "").toLowerCase().includes(search.trim().toLowerCase())
+      )
+    : visible;
+
+  // Ordenação dinâmica
+  const sorted = [...searched].sort((a, b) => {
+    if (sortBy === "oldest") return a.due_date.localeCompare(b.due_date);
+    if (sortBy === "newest") return b.due_date.localeCompare(a.due_date);
+    if (sortBy === "highest") return Number(b.amount) - Number(a.amount);
+    if (sortBy === "lowest") return Number(a.amount) - Number(b.amount);
+    return 0;
+  });
+
+  const totalPages = Math.max(Math.ceil(sorted.length / PAGE_SIZE), 1);
+  const paginated = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   function openCreate() {
     setEditing(null);
@@ -353,6 +371,29 @@ return () => clearTimeout(t);
         </div>
       </header>
 
+      {/* Busca + ordenação */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative flex-1 min-w-[200px] max-w-xs">
+          <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
+          <Input
+            className="pl-9 h-9 text-sm"
+            placeholder="Buscar cliente..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+        <Select
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+          className="h-9 w-auto text-xs"
+        >
+          <option value="oldest">Mais antigo</option>
+          <option value="newest">Mais novo</option>
+          <option value="highest">Maior valor</option>
+          <option value="lowest">Menor valor</option>
+        </Select>
+      </div>
+
       <div className="flex flex-wrap items-center gap-2">
         {FILTERS.map((f) => (
           <button
@@ -392,9 +433,11 @@ return () => clearTimeout(t);
         ) : visible.length === 0 ? (
           <EmptyState
             icon={<Receipt size={18} />}
-            title="Nenhuma cobrança aqui"
+            title={search.trim() ? "Nenhum resultado" : "Nenhuma cobrança aqui"}
             description={
-              filter === "todas" && agingFilter === "todas"
+              search.trim()
+                ? `Nenhum cliente com "${search.trim()}" nos filtros atuais.`
+                : filter === "todas" && agingFilter === "todas"
                 ? "Crie a primeira cobrança ou importe a carteira na aba Negociação."
                 : "Nenhuma cobrança com esses filtros no momento."
             }
