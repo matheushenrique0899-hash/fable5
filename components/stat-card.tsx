@@ -28,7 +28,7 @@ export function StatCard({ label, value, hint, icon, tone = "default", href }: S
           {icon}
         </span>
       </div>
-      <p className="mt-3 font-mono text-2xl font-semibold tracking-tight text-fg">{value}</p>
+      <p className="mt-3 truncate font-mono text-xl font-semibold tracking-tight text-fg sm:text-2xl">{value}</p>
       {hint && <p className="mt-1 text-xs text-muted">{hint}</p>}
     </>
   );

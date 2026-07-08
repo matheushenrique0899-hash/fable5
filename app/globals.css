@@ -5,7 +5,7 @@
 @tailwind utilities;
 
 html {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 body {
@@ -13,18 +13,21 @@ body {
 }
 
 ::selection {
-  background: rgba(62, 207, 142, 0.25);
+  background: rgba(21, 154, 99, 0.18);
 }
 
-/* Scrollbar sutil, estilo Linear */
+/* Scrollbar sutil */
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #2f3745;
+  background: #c9d0d8;
   border-radius: 8px;
-  border: 3px solid #0b0d11;
+  border: 3px solid #f6f7f9;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #a8b2bd;
 }
 ::-webkit-scrollbar-track {
   background: transparent;

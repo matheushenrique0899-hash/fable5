@@ -423,6 +423,43 @@ return () => clearTimeout(t);
         </Select>
       </div>
 
+      {/* Filtros ativos combinados (item 4) */}
+      {(filter !== "todas" || agingFilter !== "todas" || search.trim()) && (
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-faint">Filtros ativos:</span>
+          {search.trim() && (
+            <button
+              onClick={() => setSearch("")}
+              className="inline-flex items-center gap-1 rounded-full border border-border bg-surface px-2.5 py-1 text-fg hover:border-border-strong"
+            >
+              Busca: “{search.trim()}” <span className="text-faint">×</span>
+            </button>
+          )}
+          {filter !== "todas" && (
+            <button
+              onClick={() => setFilter("todas")}
+              className="inline-flex items-center gap-1 rounded-full border border-border bg-surface px-2.5 py-1 text-fg hover:border-border-strong"
+            >
+              {FILTERS.find((f) => f.value === filter)?.label} <span className="text-faint">×</span>
+            </button>
+          )}
+          {agingFilter !== "todas" && (
+            <button
+              onClick={() => setAgingFilter("todas")}
+              className="inline-flex items-center gap-1 rounded-full border border-border bg-surface px-2.5 py-1 text-fg hover:border-border-strong"
+            >
+              {AGING.find((a) => a.value === agingFilter)?.label} <span className="text-faint">×</span>
+            </button>
+          )}
+          <button
+            onClick={() => { setFilter("todas"); setAgingFilter("todas"); setSearch(""); }}
+            className="text-accent hover:underline"
+          >
+            Limpar tudo
+          </button>
+        </div>
+      )}
+
       <Card>
         {loading ? (
           <div className="space-y-3 p-5">
@@ -448,8 +485,8 @@ return () => clearTimeout(t);
               <TR>
                 <TH>Cliente</TH>
                 <TH>Valor</TH>
-                <TH className="hidden lg:table-cell">Venda</TH>
-                <TH className="hidden lg:table-cell">Parcelas</TH>
+                <TH className="hidden md:table-cell">Venda</TH>
+                <TH className="hidden xl:table-cell">Parc.</TH>
                 <TH>Vencimento</TH>
                 <TH>Status</TH>
                 <TH className="text-right">Ações</TH>
@@ -490,10 +527,10 @@ return () => clearTimeout(t);
                         </span>
                       )}
                     </TD>
-                    <TD className="hidden text-muted lg:table-cell">
+                    <TD className="hidden text-muted md:table-cell">
                       {c.sale_date ? formatDate(c.sale_date) : "—"}
                     </TD>
-                    <TD className="hidden font-mono text-muted lg:table-cell">
+                    <TD className="hidden font-mono text-muted xl:table-cell">
                       {c.installments}x
                     </TD>
                     <TD>
@@ -544,8 +581,8 @@ return () => clearTimeout(t);
                             >
                               <Handshake size={14} />
                             </Button>
-                            <Button variant="success" size="sm" onClick={() => openPay(c)}>
-                              <CheckCircle2 size={13} /> Pago
+                            <Button variant="secondary" size="sm" onClick={() => openPay(c)}>
+                              <CheckCircle2 size={13} /> Receber
                             </Button>
                           </>
                         )}
@@ -568,6 +605,21 @@ return () => clearTimeout(t);
               })}
             </TBody>
           </Table>
+        )}
+        {!loading && paginated.length > 0 && (
+          <div className="flex items-center justify-between border-t border-border bg-raised/40 px-5 py-3">
+            <span className="text-xs font-medium text-muted">
+              Total desta página ({paginated.length} {paginated.length === 1 ? "cobrança" : "cobranças"})
+            </span>
+            <span className="font-mono text-sm font-semibold text-fg">
+              {formatBRL(
+                paginated.reduce(
+                  (sum, c) => sum + Number(c.amount) - (c.paid_total ?? 0),
+                  0
+                )
+              )}
+            </span>
+          </div>
         )}
       </Card>
 
@@ -625,7 +677,7 @@ return () => clearTimeout(t);
                 <Button variant="secondary" size="sm" onClick={downloadNegTemplate}>
                   <Download size={14} /> Baixar modelo
                 </Button>
-                <label className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-md bg-accent px-3 text-xs font-semibold text-[#06231A] transition-colors hover:bg-accent-hover">
+                <label className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-md bg-accent px-3 text-xs font-semibold text-white transition-colors hover:bg-accent-hover">
                   <Upload size={14} />
                   Escolher arquivo CSV
                   <input

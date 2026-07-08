@@ -5,31 +5,31 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // Design system FABLE 5 — dark, sóbrio, financeiro
-        bg: "#0B0D11",          // fundo global
-        surface: "#12151B",     // cards / painéis
-        raised: "#181C24",      // hover / elementos elevados
-        border: "#232936",      // bordas sutis
-        "border-strong": "#2F3745",
-        fg: "#E9ECF1",          // texto principal
-        muted: "#8B93A1",       // texto secundário
-        faint: "#5B6372",       // texto terciário / labels
+        // Design system Cifra Cobranças — light, legível, financeiro (público +40)
+        bg: "#F6F7F9",          // fundo global (cinza muito claro)
+        surface: "#FFFFFF",     // cards / painéis (branco)
+        raised: "#EEF1F4",      // hover / elementos elevados
+        border: "#E1E5EA",      // bordas sutis
+        "border-strong": "#C9D0D8",
+        fg: "#1A1F28",          // texto principal (quase preto)
+        muted: "#5A6472",       // texto secundário
+        faint: "#8A94A3",       // texto terciário / labels
         accent: {
-          DEFAULT: "#3ECF8E",   // verde financeiro (ação primária)
-          hover: "#34B87D",
-          soft: "rgba(62,207,142,0.12)",
+          DEFAULT: "#159A63",   // verde financeiro mais escuro (contraste em fundo branco)
+          hover: "#0F7E50",
+          soft: "rgba(21,154,99,0.10)",
         },
-        warn: { DEFAULT: "#F5B94E", soft: "rgba(245,185,78,0.12)" },
-        danger: { DEFAULT: "#F0645C", soft: "rgba(240,100,92,0.12)" },
-        info: { DEFAULT: "#6E9BF5", soft: "rgba(110,155,245,0.12)" },
+        warn: { DEFAULT: "#B8791A", soft: "rgba(184,121,26,0.10)" },
+        danger: { DEFAULT: "#CE3A34", soft: "rgba(206,58,52,0.10)" },
+        info: { DEFAULT: "#2563C9", soft: "rgba(37,99,201,0.10)" },
       },
       fontFamily: {
         sans: ["Inter", "system-ui", "sans-serif"],
         mono: ["'JetBrains Mono'", "ui-monospace", "monospace"],
       },
       boxShadow: {
-        card: "0 1px 0 0 rgba(255,255,255,0.03) inset, 0 1px 2px rgba(0,0,0,0.4)",
-        pop: "0 8px 30px rgba(0,0,0,0.55)",
+        card: "0 1px 2px rgba(16,24,40,0.06), 0 1px 3px rgba(16,24,40,0.04)",
+        pop: "0 10px 40px rgba(16,24,40,0.18)",
       },
       keyframes: {
         "fade-up": {

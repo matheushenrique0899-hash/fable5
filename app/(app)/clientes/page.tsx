@@ -316,7 +316,7 @@ export default function ClientesPage() {
             <Button variant="secondary" size="sm" onClick={downloadTemplate}>
               <Download size={14} /> Baixar modelo
             </Button>
-            <label className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-md bg-accent px-3 text-xs font-semibold text-[#06231A] transition-colors hover:bg-accent-hover">
+            <label className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-md bg-accent px-3 text-xs font-semibold text-white transition-colors hover:bg-accent-hover">
               <Upload size={14} />
               {importing ? "Importando..." : "Escolher arquivo"}
               <input

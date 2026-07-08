@@ -258,11 +258,11 @@ export default function DashboardPage() {
                                 </Button>
                               )}
                               <Button
-                                variant="success"
+                                variant="secondary"
                                 size="sm"
                                 onClick={() => handleQuickPay(c.id)}
                               >
-                                <CheckCircle2 size={13} /> Pago
+                                <CheckCircle2 size={13} /> Receber
                               </Button>
                             </div>
                           </TD>
