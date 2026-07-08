@@ -12,7 +12,7 @@ import {
   refreshOverdue,
   ensureNegotiationForClient,
 } from "@/lib/services/charges";
-import { listAllClientsLite } from "@/lib/services/clients";
+import { listAllClientsLite, updateClientPhone } from "@/lib/services/clients";
 import { listActiveNegotiationClientIds } from "@/lib/services/negotiations";
 import Link from "next/link";
 import {
@@ -60,6 +60,7 @@ const emptyForm = {
   sale_date: "",
   installments: "1",
   description: "",
+  phone: "",
 };
 
 export default function CobrancasPage() {
@@ -180,6 +181,7 @@ return () => clearTimeout(t);
       sale_date: c.sale_date ?? "",
       installments: String(c.installments ?? 1),
       description: c.description ?? "",
+      phone: c.clients?.phone ?? "",
     });
     setFormError(null);
     setDialogOpen(true);
@@ -204,8 +206,15 @@ return () => clearTimeout(t);
         installments: Math.max(parseInt(form.installments) || 1, 1),
         description: form.description,
       };
-      if (editing) await updateCharge(editing.id, payload);
-      else await createCharge(payload);
+      if (editing) {
+        await updateCharge(editing.id, payload);
+        // Atualiza o telefone do cliente vinculado (agilidade para o cobrador)
+        if (form.phone.replace(/\D/g, "") !== (editing.clients?.phone ?? "")) {
+          await updateClientPhone(editing.client_id, form.phone);
+        }
+      } else {
+        await createCharge(payload);
+      }
       setDialogOpen(false);
       await load();
     } catch (e) {
@@ -669,7 +678,7 @@ return () => clearTimeout(t);
             <>
               <p className="text-sm text-muted">
                 Exporte do ERP, ajuste os cabeçalhos para{" "}
-                <span className="font-mono text-xs text-fg">Código; Nome; Total; Venda; Vencimento</span>{" "}
+                <span className="font-mono text-xs text-fg">Código; Nome; Total; Venda; Vencimento; Telefone</span>{" "}
                 e salve como CSV. O sistema agrupa por código, soma o saldo devedor e cria o
                 cliente + a cobrança. Parcelas e negociação você define depois, linha a linha.
               </p>
@@ -842,6 +851,22 @@ return () => clearTimeout(t);
               />
             </div>
           </div>
+          {editing && (
+            <div>
+              <Label htmlFor="ch-phone">Telefone / WhatsApp do cliente</Label>
+              <Input
+                id="ch-phone"
+                className="font-mono"
+                inputMode="tel"
+                placeholder="65999990000"
+                value={form.phone}
+                onChange={(e) => setForm({ ...form, phone: e.target.value })}
+              />
+              <p className="mt-1.5 text-xs text-faint">
+                Salvar aqui atualiza o cadastro do cliente e libera o botão de WhatsApp.
+              </p>
+            </div>
+          )}
           <div>
             <Label htmlFor="ch-desc">Descrição</Label>
             <Textarea

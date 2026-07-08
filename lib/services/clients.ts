@@ -175,3 +175,14 @@ export const CSV_TEMPLATE =
   "nome;documento;email;telefone\n" +
   "Agro Silva Ltda;12345678000190;contato@agrosilva.com.br;65999990000\n" +
   "Maria Souza;12345678901;maria@email.com;65988887777\n";
+
+// Atualiza só o telefone de um cliente (usado no editar cobrança para agilidade)
+export async function updateClientPhone(clientId: string, phone: string) {
+  const supabase = createClient();
+  const digits = phone.replace(/\D/g, "");
+  const { error } = await supabase
+    .from("clients")
+    .update({ phone: digits || null })
+    .eq("id", clientId);
+  if (error) throw error;
+}
