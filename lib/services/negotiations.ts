@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
-import type { Negotiation, NegotiationStatus } from "@/lib/types";
+import type { Negotiation, NegotiationStatus, NegotiationContact } from "@/lib/types";
 
 export async function listNegotiations(status?: NegotiationStatus | "todas") {
   const supabase = createClient();
@@ -20,6 +20,9 @@ export interface NegotiationInput {
   first_contact?: string;
   last_contact?: string;
   notes?: string;
+  agreed_amount?: number | null;
+  agreed_installments?: number | null;
+  agreed_due?: string | null;
 }
 
 export async function createNegotiation(input: NegotiationInput) {
@@ -46,6 +49,9 @@ export async function updateNegotiation(id: string, input: Partial<NegotiationIn
     first_contact: input.first_contact || null,
     last_contact: input.last_contact || null,
     notes: input.notes?.trim() || null,
+    agreed_amount: input.agreed_amount ?? null,
+    agreed_installments: input.agreed_installments ?? null,
+    agreed_due: input.agreed_due || null,
   }).eq("id", id);
   if (error) throw error;
 }
@@ -65,4 +71,120 @@ export async function listActiveNegotiationClientIds(): Promise<Set<string>> {
     .in("status", ["em_negociacao", "aguardando_retorno"]);
   if (error) throw error;
   return new Set((data ?? []).map((n) => n.client_id));
+}
+
+// ---------- Histórico de contatos ----------
+export async function listContacts(negotiationId: string): Promise<NegotiationContact[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("negotiation_contacts")
+    .select("*")
+    .eq("negotiation_id", negotiationId)
+    .order("contact_date", { ascending: false })
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as NegotiationContact[];
+}
+
+// Adiciona um contato e mantém first/last_contact da negociação sincronizados
+export async function addContact(
+  negotiation: Pick<Negotiation, "id" | "first_contact" | "last_contact">,
+  contactDate: string,
+  note: string
+) {
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Sessão expirada. Faça login novamente.");
+
+  const { error } = await supabase.from("negotiation_contacts").insert({
+    owner_id: user.id,
+    negotiation_id: negotiation.id,
+    contact_date: contactDate,
+    note: note.trim(),
+  });
+  if (error) throw error;
+
+  const updates: Record<string, string> = {};
+  if (!negotiation.first_contact || contactDate < negotiation.first_contact)
+    updates.first_contact = contactDate;
+  if (!negotiation.last_contact || contactDate > negotiation.last_contact)
+    updates.last_contact = contactDate;
+  if (Object.keys(updates).length > 0) {
+    await supabase.from("negotiations").update(updates).eq("id", negotiation.id);
+  }
+}
+
+export async function deleteContact(id: string) {
+  const supabase = createClient();
+  const { error } = await supabase.from("negotiation_contacts").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// ---------- Parcelas do acordo ----------
+import type { AgreementInstallment } from "@/lib/types";
+
+export async function listInstallments(negotiationId: string): Promise<AgreementInstallment[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("agreement_installments")
+    .select("*")
+    .eq("negotiation_id", negotiationId)
+    .order("installment_no");
+  if (error) throw error;
+  return (data ?? []) as AgreementInstallment[];
+}
+
+// Gera as N parcelas do acordo.
+// Se já existirem parcelas para esta negociação, apaga e recria.
+export async function generateInstallments(
+  negotiationId: string,
+  totalAmount: number,
+  numInstallments: number,
+  firstDue: string // YYYY-MM-DD
+): Promise<void> {
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Sessão expirada.");
+
+  // Remove anteriores
+  await supabase
+    .from("agreement_installments")
+    .delete()
+    .eq("negotiation_id", negotiationId);
+
+  const installmentAmount = Math.floor((totalAmount / numInstallments) * 100) / 100;
+  const lastAmount = Math.round((totalAmount - installmentAmount * (numInstallments - 1)) * 100) / 100;
+
+  const rows = Array.from({ length: numInstallments }, (_, i) => {
+    const due = new Date(firstDue + "T12:00:00");
+    due.setMonth(due.getMonth() + i);
+    return {
+      owner_id: user.id,
+      negotiation_id: negotiationId,
+      installment_no: i + 1,
+      amount: i === numInstallments - 1 ? lastAmount : installmentAmount,
+      due_date: due.toISOString().slice(0, 10),
+    };
+  });
+
+  const { error } = await supabase.from("agreement_installments").insert(rows);
+  if (error) throw error;
+}
+
+export async function payInstallment(id: string): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("agreement_installments")
+    .update({ paid_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) throw error;
+}
+
+export async function unpayInstallment(id: string): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("agreement_installments")
+    .update({ paid_at: null })
+    .eq("id", id);
+  if (error) throw error;
 }

@@ -10,12 +10,26 @@ export async function listCharges(status?: ChargeStatus | "todas") {
   const supabase = createClient();
   let query = supabase
     .from("charges")
-    .select("*, clients(name, document)")
+    .select("*, clients(name, document, phone)")
     .order("due_date", { ascending: true });
   if (status && status !== "todas") query = query.eq("status", status);
   const { data, error } = await query;
   if (error) throw error;
-  return (data ?? []) as Charge[];
+  const charges = (data ?? []) as Charge[];
+
+  // Anexa a soma dos pagamentos parciais de cada cobrança
+  if (charges.length > 0) {
+    const { data: payments } = await supabase
+      .from("charge_payments")
+      .select("charge_id, amount")
+      .in("charge_id", charges.map((c) => c.id));
+    const paidMap = new Map<string, number>();
+    (payments ?? []).forEach((p) => {
+      paidMap.set(p.charge_id, (paidMap.get(p.charge_id) ?? 0) + Number(p.amount));
+    });
+    charges.forEach((c) => { c.paid_total = paidMap.get(c.id) ?? 0; });
+  }
+  return charges;
 }
 
 export async function createCharge(input: {
@@ -41,17 +55,84 @@ export async function createCharge(input: {
   if (error) throw error;
 }
 
+// Registra um pagamento (total ou parcial). Quita a cobrança quando o
+// acumulado atinge o valor devido. Retorna o saldo restante.
+export async function registerPayment(
+  chargeId: string,
+  amount: number,
+  paidDate?: string
+): Promise<{ remaining: number; settled: boolean }> {
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Sessão expirada. Faça login novamente.");
+
+  const date = paidDate || new Date().toISOString().slice(0, 10);
+
+  const { data: charge, error: ce } = await supabase
+    .from("charges")
+    .select("amount")
+    .eq("id", chargeId)
+    .single();
+  if (ce) throw ce;
+
+  const { data: prev } = await supabase
+    .from("charge_payments")
+    .select("amount")
+    .eq("charge_id", chargeId);
+  const alreadyPaid = (prev ?? []).reduce((s, p) => s + Number(p.amount), 0);
+  const total = Number(charge.amount);
+
+  if (amount <= 0) throw new Error("O valor do pagamento precisa ser maior que zero.");
+  if (alreadyPaid + amount > total + 0.009)
+    throw new Error(
+      `Valor acima do saldo. Restam R$ ${(total - alreadyPaid).toFixed(2).replace(".", ",")}.`
+    );
+
+  const { error: pe } = await supabase.from("charge_payments").insert({
+    owner_id: user.id,
+    charge_id: chargeId,
+    amount,
+    paid_date: date,
+  });
+  if (pe) throw pe;
+
+  const newPaid = alreadyPaid + amount;
+  const settled = newPaid >= total - 0.009;
+
+  if (settled) {
+    const paid_at = new Date(date + "T12:00:00").toISOString();
+    const { error } = await supabase
+      .from("charges")
+      .update({ status: "pago", paid_at })
+      .eq("id", chargeId);
+    if (error) throw error;
+  }
+
+  return { remaining: Math.max(total - newPaid, 0), settled };
+}
+
+// Quitação total em um clique (usada no Dashboard): paga o saldo restante
 export async function markAsPaid(id: string, paidDate?: string) {
   const supabase = createClient();
-  // paidDate vem como YYYY-MM-DD; guarda ao meio-dia para evitar troca de fuso
-  const paid_at = paidDate
-    ? new Date(paidDate + "T12:00:00").toISOString()
-    : new Date().toISOString();
-  const { error } = await supabase
+  const { data: charge, error: ce } = await supabase
     .from("charges")
-    .update({ status: "pago", paid_at })
-    .eq("id", id);
-  if (error) throw error;
+    .select("amount")
+    .eq("id", id)
+    .single();
+  if (ce) throw ce;
+  const { data: prev } = await supabase
+    .from("charge_payments")
+    .select("amount")
+    .eq("charge_id", id);
+  const alreadyPaid = (prev ?? []).reduce((s, p) => s + Number(p.amount), 0);
+  const remaining = Number(charge.amount) - alreadyPaid;
+  if (remaining <= 0.009) {
+    // Já quitada por pagamentos: só garante o status
+    const paid_at = new Date((paidDate || new Date().toISOString().slice(0, 10)) + "T12:00:00").toISOString();
+    await supabase.from("charges").update({ status: "pago", paid_at }).eq("id", id);
+    return;
+  }
+  await registerPayment(id, remaining, paidDate);
 }
 
 export async function updateCharge(id: string, input: {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -19,15 +20,22 @@ export function Dialog({
 }) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    if (open) document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
+    if (open) {
+      document.addEventListener("keydown", handler);
+      document.body.style.overflow = "hidden";
+    }
+    return () => {
+      document.removeEventListener("keydown", handler);
+      document.body.style.overflow = "";
+    };
   }, [open, onClose]);
 
-  if (!open) return null;
+  if (!open || typeof document === "undefined") return null;
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+      style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0 }}
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
       <div
@@ -48,8 +56,9 @@ export function Dialog({
             <X size={16} />
           </button>
         </div>
-        <div className="p-5">{children}</div>
+        <div className="max-h-[80vh] overflow-y-auto p-5">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

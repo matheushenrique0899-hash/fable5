@@ -1,16 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Handshake, Pencil, Trash2 } from "lucide-react";
+import { Handshake, Pencil, Trash2, History, Plus, CheckCircle2, RotateCcw } from "lucide-react";
 import {
   listNegotiations,
-  createNegotiation,
   updateNegotiation,
   deleteNegotiation,
+  listContacts,
+  addContact,
+  listInstallments,
+  generateInstallments,
+  payInstallment,
+  unpayInstallment,
 } from "@/lib/services/negotiations";
 import { listCharges, computeAging, refreshOverdue } from "@/lib/services/charges";
 import { listAllClientsLite } from "@/lib/services/clients";
-import type { Negotiation, NegotiationStatus } from "@/lib/types";
+import type { Negotiation, NegotiationStatus, NegotiationContact, AgreementInstallment } from "@/lib/types";
 import { NEGOTIATION_LABELS } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -49,6 +54,9 @@ const emptyForm = {
   first_contact: "",
   last_contact: "",
   notes: "",
+  agreed_amount: "",
+  agreed_installments: "",
+  agreed_due: "",
 };
 
 export default function NegociacaoPage() {
@@ -64,6 +72,18 @@ export default function NegociacaoPage() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<Negotiation | null>(null);
+
+  // Histórico de contatos
+  const [historyOf, setHistoryOf] = useState<Negotiation | null>(null);
+  const [contacts, setContacts] = useState<NegotiationContact[] | null>(null);
+  const [newContactDate, setNewContactDate] = useState("");
+  const [newContactNote, setNewContactNote] = useState("");
+  const [contactError, setContactError] = useState<string | null>(null);
+  const [savingContact, setSavingContact] = useState(false);
+
+  // Parcelas do acordo
+  const [installments, setInstallments] = useState<AgreementInstallment[] | null>(null);
+  const [historyTab, setHistoryTab] = useState<"contacts" | "installments">("contacts");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -103,6 +123,9 @@ export default function NegociacaoPage() {
       first_contact: n.first_contact ?? "",
       last_contact: n.last_contact ?? "",
       notes: n.notes ?? "",
+      agreed_amount: n.agreed_amount ? String(n.agreed_amount).replace(".", ",") : "",
+      agreed_installments: n.agreed_installments ? String(n.agreed_installments) : "",
+      agreed_due: n.agreed_due ?? "",
     });
     setFormError(null);
     setDialogOpen(true);
@@ -120,8 +143,34 @@ export default function NegociacaoPage() {
 
     setSaving(true);
     try {
-      if (editing) await updateNegotiation(editing.id, form);
-      else await createNegotiation(form);
+      const agreed = form.status === "aceitou";
+      const payload = {
+        ...form,
+        agreed_amount: agreed && form.agreed_amount
+          ? Number(form.agreed_amount.replace(/\./g, "").replace(",", "."))
+          : null,
+        agreed_installments: agreed && form.agreed_installments
+          ? Math.max(parseInt(form.agreed_installments) || 1, 1)
+          : null,
+        agreed_due: agreed ? form.agreed_due || null : null,
+      };
+      if (editing) {
+        await updateNegotiation(editing.id, payload);
+        // Gera (ou regenera) as parcelas do acordo quando status = aceitou
+        if (
+          payload.status === "aceitou" &&
+          payload.agreed_amount &&
+          payload.agreed_installments &&
+          payload.agreed_due
+        ) {
+          await generateInstallments(
+            editing.id,
+            payload.agreed_amount,
+            payload.agreed_installments,
+            payload.agreed_due
+          );
+        }
+      }
       setDialogOpen(false);
       await load();
     } catch (e) {
@@ -136,6 +185,51 @@ export default function NegociacaoPage() {
     await deleteNegotiation(deleting.id);
     setDeleting(null);
     await load();
+  }
+
+  async function openHistory(n: Negotiation) {
+    setHistoryOf(n);
+    setContacts(null);
+    setInstallments(null);
+    setNewContactDate(new Date().toISOString().slice(0, 10));
+    setNewContactNote("");
+    setContactError(null);
+    setHistoryTab(n.status === "aceitou" && n.agreed_installments ? "installments" : "contacts");
+    try {
+      const [c, inst] = await Promise.all([
+        listContacts(n.id),
+        n.status === "aceitou" ? listInstallments(n.id) : Promise.resolve([]),
+      ]);
+      setContacts(c);
+      setInstallments(inst);
+    } catch {
+      setContacts([]);
+      setInstallments([]);
+    }
+  }
+
+  async function handleAddContact() {
+    if (!historyOf) return;
+    setContactError(null);
+    if (!newContactNote.trim()) return setContactError("Descreva o contato.");
+    if (!newContactDate) return setContactError("Informe a data.");
+    setSavingContact(true);
+    try {
+      await addContact(historyOf, newContactDate, newContactNote);
+      setContacts(await listContacts(historyOf.id));
+      setNewContactNote("");
+      await load(); // atualiza primeiro/último contato na tabela
+    } catch (e) {
+      setContactError(e instanceof Error ? e.message : "Erro ao registrar contato.");
+    } finally {
+      setSavingContact(false);
+    }
+  }
+
+  async function handlePayInstallment(id: string, paid: boolean) {
+    if (paid) await unpayInstallment(id);
+    else await payInstallment(id);
+    if (historyOf) setInstallments(await listInstallments(historyOf.id));
   }
 
   return (
@@ -279,9 +373,24 @@ export default function NegociacaoPage() {
                       <span className="h-1.5 w-1.5 rounded-full bg-current" />
                       {NEGOTIATION_LABELS[n.status]}
                     </span>
+                    {n.status === "aceitou" && n.agreed_amount && (
+                      <span className="mt-1 block font-mono text-[11px] text-accent">
+                        {formatBRL(Number(n.agreed_amount))}
+                        {n.agreed_installments ? ` em ${n.agreed_installments}x` : ""}
+                      </span>
+                    )}
                   </TD>
                   <TD>
                     <div className="flex justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label="Histórico de contatos"
+                        title="Histórico de contatos"
+                        onClick={() => openHistory(n)}
+                      >
+                        <History size={14} />
+                      </Button>
                       <Button variant="ghost" size="icon" aria-label="Editar" onClick={() => openEdit(n)}>
                         <Pencil size={14} />
                       </Button>
@@ -368,6 +477,42 @@ export default function NegociacaoPage() {
               />
             </div>
           </div>
+          {form.status === "aceitou" && (
+            <div className="grid grid-cols-1 gap-4 rounded-md border border-accent/20 bg-accent-soft/40 p-3 sm:grid-cols-3">
+              <div>
+                <Label htmlFor="n-agreed">Valor do acordo (R$)</Label>
+                <Input
+                  id="n-agreed"
+                  className="font-mono"
+                  inputMode="decimal"
+                  placeholder="500,00"
+                  value={form.agreed_amount}
+                  onChange={(e) => setForm({ ...form, agreed_amount: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label htmlFor="n-inst">Parcelas</Label>
+                <Input
+                  id="n-inst"
+                  className="font-mono"
+                  type="number"
+                  min={1}
+                  placeholder="3"
+                  value={form.agreed_installments}
+                  onChange={(e) => setForm({ ...form, agreed_installments: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label htmlFor="n-due">1º vencimento</Label>
+                <Input
+                  id="n-due"
+                  type="date"
+                  value={form.agreed_due}
+                  onChange={(e) => setForm({ ...form, agreed_due: e.target.value })}
+                />
+              </div>
+            </div>
+          )}
           <div>
             <Label htmlFor="n-notes">O que foi negociado</Label>
             <Textarea
@@ -388,6 +533,182 @@ export default function NegociacaoPage() {
               {saving ? "Salvando..." : editing ? "Salvar alterações" : "Registrar negociação"}
             </Button>
           </div>
+        </div>
+      </Dialog>
+
+      {/* Histórico de contatos + parcelas */}
+      <Dialog
+        open={!!historyOf}
+        onClose={() => setHistoryOf(null)}
+        title={`Histórico — ${historyOf?.clients?.name ?? ""}`}
+        className="max-w-lg"
+      >
+        <div className="space-y-4">
+          {/* Abas */}
+          {historyOf?.status === "aceitou" && historyOf.agreed_installments && (
+            <div className="grid grid-cols-2 gap-1 rounded-md border border-border bg-bg p-1">
+              {(["contacts", "installments"] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setHistoryTab(tab)}
+                  className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+                    historyTab === tab ? "bg-raised text-fg" : "text-muted hover:text-fg"
+                  }`}
+                >
+                  {tab === "contacts" ? "Linha do tempo" : `Parcelas (${historyOf.agreed_installments}x)`}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* ABA: PARCELAS */}
+          {historyTab === "installments" && historyOf?.status === "aceitou" && (
+            <div className="space-y-2">
+              {historyOf.agreed_amount && (
+                <p className="text-xs text-muted">
+                  Acordo de{" "}
+                  <span className="font-mono text-fg">
+                    {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(historyOf.agreed_amount))}
+                  </span>{" "}
+                  em {historyOf.agreed_installments}x
+                  {(() => {
+                    const paid = (installments ?? []).filter((i) => i.paid_at).length;
+                    const total = (installments ?? []).length;
+                    return total > 0
+                      ? ` — ${paid} paga${paid !== 1 ? "s" : ""}, ${total - paid} em aberto`
+                      : "";
+                  })()}
+                </p>
+              )}
+              {installments === null ? (
+                <div className="space-y-2">
+                  {[...Array(3)].map((_, i) => (
+                    <div key={i} className="h-9 animate-pulse rounded bg-raised" />
+                  ))}
+                </div>
+              ) : installments.length === 0 ? (
+                <p className="py-2 text-center text-sm text-muted">
+                  Nenhuma parcela gerada. Salve o acordo com valor, parcelas e 1º vencimento.
+                </p>
+              ) : (
+                <div className="max-h-64 overflow-y-auto">
+                  <table className="w-full text-sm">
+                    <thead className="border-b border-border">
+                      <tr>
+                        <th className="py-2 text-left text-xs uppercase tracking-wide text-faint">Parcela</th>
+                        <th className="py-2 text-left text-xs uppercase tracking-wide text-faint">Vencimento</th>
+                        <th className="py-2 text-right text-xs uppercase tracking-wide text-faint">Valor</th>
+                        <th className="py-2 text-right text-xs uppercase tracking-wide text-faint">Situação</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/60">
+                      {installments.map((inst) => (
+                        <tr key={inst.id}>
+                          <td className="py-2.5 font-mono text-muted">{inst.installment_no}ª</td>
+                          <td className="py-2.5 text-fg">
+                            {inst.due_date.split("-").reverse().join("/")}
+                            {!inst.paid_at && new Date(inst.due_date + "T23:59:59") < new Date() && (
+                              <span className="ml-2 text-xs text-danger">vencida</span>
+                            )}
+                          </td>
+                          <td className="py-2.5 text-right font-mono">
+                            {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(inst.amount))}
+                          </td>
+                          <td className="py-2.5 text-right">
+                            <button
+                              onClick={() => handlePayInstallment(inst.id, !!inst.paid_at)}
+                              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors ${
+                                inst.paid_at
+                                  ? "border-accent/25 bg-accent-soft text-accent hover:bg-danger-soft hover:text-danger hover:border-danger/25"
+                                  : "border-border bg-raised text-muted hover:border-accent/25 hover:bg-accent-soft hover:text-accent"
+                              }`}
+                              title={inst.paid_at ? "Clique para desfazer" : "Clique para marcar pago"}
+                            >
+                              {inst.paid_at ? (
+                                <><CheckCircle2 size={11} /> Paga</>
+                              ) : (
+                                <><RotateCcw size={11} /> Em aberto</>
+                              )}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ABA: CONTATOS */}
+          {(historyTab === "contacts" || historyOf?.status !== "aceitou" || !historyOf?.agreed_installments) && (
+            <div className="space-y-4">
+              <div className="space-y-3 rounded-md border border-border bg-bg p-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-[140px_1fr]">
+                  <div>
+                    <Label htmlFor="hc-date">Data</Label>
+                    <Input
+                      id="hc-date"
+                      type="date"
+                      value={newContactDate}
+                      onChange={(e) => setNewContactDate(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="hc-note">O que aconteceu</Label>
+                    <Input
+                      id="hc-note"
+                      placeholder="Ex.: liguei, prometeu pagar dia 15"
+                      value={newContactNote}
+                      onChange={(e) => setNewContactNote(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && handleAddContact()}
+                    />
+                  </div>
+                </div>
+                {contactError && (
+                  <p className="rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger">
+                    {contactError}
+                  </p>
+                )}
+                <div className="flex justify-end">
+                  <Button size="sm" onClick={handleAddContact} disabled={savingContact}>
+                    <Plus size={13} /> {savingContact ? "Salvando..." : "Registrar contato"}
+                  </Button>
+                </div>
+              </div>
+
+              {contacts === null ? (
+                <div className="space-y-2">
+                  {[...Array(3)].map((_, i) => (
+                    <div key={i} className="h-9 animate-pulse rounded bg-raised" />
+                  ))}
+                </div>
+              ) : contacts.length === 0 ? (
+                <p className="py-2 text-center text-sm text-muted">
+                  Nenhum contato registrado ainda.
+                </p>
+              ) : (
+                <ol className="max-h-64 space-y-0 overflow-y-auto">
+                  {contacts.map((c, i) => (
+                    <li key={c.id} className="relative flex gap-3 pb-4">
+                      <div className="flex flex-col items-center">
+                        <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-accent" />
+                        {i < contacts.length - 1 && (
+                          <span className="w-px flex-1 bg-border" />
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-mono text-xs text-faint">
+                          {formatDate(c.contact_date)}
+                        </p>
+                        <p className="text-sm text-fg">{c.note}</p>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </div>
+          )}
         </div>
       </Dialog>
 

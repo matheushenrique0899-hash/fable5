@@ -6,6 +6,7 @@ export interface ImportNegRow {
   total: number;
   sale_date: string;   // YYYY-MM-DD
   oldest_due: string;  // YYYY-MM-DD (vencimento mais antigo)
+  phone: string | null;
 }
 
 export interface ImportNegResult {
@@ -60,6 +61,7 @@ export function parseNegotiationsCSV(text: string): {
   const iTotal = header.findIndex((h) => h.includes("total") || h.includes("receber") || h.includes("saldo"));
   const iSale = header.findIndex((h) => h.includes("venda") || h === "sale");
   const iDue = header.findIndex((h) => h.includes("vencimento") || h.includes("venc") || h === "due");
+  const iPhone = header.findIndex((h) => h.includes("telefone") || h.includes("fone") || h.includes("celular") || h === "phone");
 
   if (iCode === -1 || iName === -1 || iTotal === -1 || iSale === -1 || iDue === -1) {
     errors.push(
@@ -68,7 +70,7 @@ export function parseNegotiationsCSV(text: string): {
     return { rows: [], errors };
   }
 
-  const map = new Map<string, { name: string; total: number; sale: Date; oldest: Date }>();
+  const map = new Map<string, { name: string; total: number; sale: Date; oldest: Date; phone: string | null }>();
 
   lines.slice(1).forEach((line, i) => {
     const cols = line.split(sep).map((c) => c.replace(/^"|"$/g, "").trim());
@@ -86,13 +88,17 @@ export function parseNegotiationsCSV(text: string): {
     if (!due) { errors.push(`Linha ${i + 2}: vencimento inválido (${cols[iDue]})`); return; }
     if (!sale) { errors.push(`Linha ${i + 2}: data de venda inválida (${cols[iSale]})`); return; }
 
+    const rawPhone = iPhone !== -1 ? (cols[iPhone] ?? "").replace(/\D/g, "") : "";
+    const phone = rawPhone.length >= 10 ? rawPhone : null;
+
     const existing = map.get(code);
     if (existing) {
       existing.total += total;
       if (due < existing.oldest) existing.oldest = due;
       if (sale < existing.sale) existing.sale = sale;
+      if (!existing.phone && phone) existing.phone = phone;
     } else {
-      map.set(code, { name, total, sale, oldest: due });
+      map.set(code, { name, total, sale, oldest: due, phone });
     }
   });
 
@@ -102,6 +108,7 @@ export function parseNegotiationsCSV(text: string): {
     total: Math.round(v.total * 100) / 100,
     sale_date: v.sale.toISOString().slice(0, 10),
     oldest_due: v.oldest.toISOString().slice(0, 10),
+    phone: v.phone,
   }));
 
   return { rows, errors };
@@ -125,17 +132,26 @@ export async function importNegotiations(rows: ImportNegRow[]): Promise<ImportNe
       let clientId: string;
       const { data: existing } = await supabase
         .from("clients")
-        .select("id")
+        .select("id, phone")
         .eq("owner_id", user.id)
         .eq("document", docKey)
         .maybeSingle();
 
       if (existing) {
         clientId = existing.id;
+        // Completa o telefone se o cadastro ainda não tiver
+        if (!existing.phone && row.phone) {
+          await supabase.from("clients").update({ phone: row.phone }).eq("id", clientId);
+        }
       } else {
         const { data: newClient, error: ce } = await supabase
           .from("clients")
-          .insert({ owner_id: user.id, name: row.name, document: docKey })
+          .insert({
+            owner_id: user.id,
+            name: row.name,
+            document: docKey,
+            phone: row.phone,
+          })
           .select("id")
           .single();
         if (ce) { errors.push(`${row.name}: ${ce.message}`); skipped++; continue; }
@@ -164,6 +180,6 @@ export async function importNegotiations(rows: ImportNegRow[]): Promise<ImportNe
 }
 
 export const NEG_CSV_TEMPLATE =
-  "Código;Nome;Total;Venda;Vencimento\n" +
-  "3091;EDIELY FAVETTI LOPES;555,00;10/11/2019;10/12/2019\n" +
-  "3266;SIMONE CRISTINA MENEZES;169,85;09/01/2019;09/02/2019\n";
+  "Código;Nome;Total;Venda;Vencimento;Telefone\n" +
+  "3091;EDIELY FAVETTI LOPES;555,00;10/11/2019;10/12/2019;65999990000\n" +
+  "3266;SIMONE CRISTINA MENEZES;169,85;09/01/2019;09/02/2019;65988887777\n";

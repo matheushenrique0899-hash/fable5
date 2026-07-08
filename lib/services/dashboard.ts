@@ -70,11 +70,10 @@ export async function getDashboardData(): Promise<DashboardData> {
   // Recebido no mês
   const receivedThisMonth = paidMonth.reduce((s, c) => s + Number(c.amount), 0);
 
-  // Taxa de recuperação
-  const dueUnpaidThisMonth = open
-    .filter((c) => c.due_date >= monthStartDate && c.due_date < nextMonthDate)
-    .reduce((s, c) => s + Number(c.amount), 0);
-  const denom = receivedThisMonth + dueUnpaidThisMonth;
+  // Taxa de recuperação: recebido no mês ÷ (recebido no mês + total ainda em atraso hoje)
+  // Responde: "do que estava devendo, quanto recuperamos este mês?"
+  const totalOverdue = overdue.reduce((s, c) => s + Number(c.amount), 0);
+  const denom = receivedThisMonth + totalOverdue;
   const recoveryRate = denom > 0 ? Math.round((receivedThisMonth / denom) * 100) : null;
 
   // Em negociação

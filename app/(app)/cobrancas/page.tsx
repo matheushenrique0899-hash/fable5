@@ -2,12 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Receipt, Plus, CheckCircle2, Trash2, Pencil, Handshake, Upload, Download } from "lucide-react";
+import { Receipt, Plus, CheckCircle2, Trash2, Pencil, Handshake, Upload, Download, MessageCircle, FileDown } from "lucide-react";
 import {
   listCharges,
   createCharge,
   updateCharge,
-  markAsPaid,
+  registerPayment,
   deleteCharge,
   refreshOverdue,
   ensureNegotiationForClient,
@@ -69,6 +69,8 @@ export default function CobrancasPage() {
   const [filter, setFilter] = useState<Filter>("todas");
   const [agingFilter, setAgingFilter] = useState<AgingFilter>("todas");
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 20;
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Charge | null>(null);
@@ -79,6 +81,8 @@ export default function CobrancasPage() {
 
   const [paying, setPaying] = useState<Charge | null>(null);
   const [payDate, setPayDate] = useState("");
+  const [payAmount, setPayAmount] = useState("");
+  const [payError, setPayError] = useState<string | null>(null);
 
   const [toast, setToast] = useState<string | null>(null);
   const [negotiatingIds, setNegotiatingIds] = useState<Set<string>>(new Set());
@@ -90,6 +94,9 @@ export default function CobrancasPage() {
   const [previewErrors, setPreviewErrors] = useState<string[]>([]);
   const [importResult, setImportResult] = useState<ImportNegResult | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
+
+  // Reset página quando filtro muda
+  useEffect(() => { setPage(1); }, [filter, agingFilter]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -134,7 +141,10 @@ return () => clearTimeout(t);
 
   const openTotal = visible
     .filter((c) => c.status !== "pago")
-    .reduce((s, c) => s + Number(c.amount), 0);
+    .reduce((s, c) => s + Number(c.amount) - (c.paid_total ?? 0), 0);
+
+  const totalPages = Math.max(Math.ceil(visible.length / PAGE_SIZE), 1);
+  const paginated = visible.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   function openCreate() {
     setEditing(null);
@@ -190,13 +200,60 @@ return () => clearTimeout(t);
   function openPay(c: Charge) {
     setPaying(c);
     setPayDate(new Date().toISOString().slice(0, 10));
+    const remaining = Number(c.amount) - (c.paid_total ?? 0);
+    setPayAmount(remaining.toFixed(2).replace(".", ","));
+    setPayError(null);
   }
 
   async function confirmPay() {
     if (!paying) return;
-    await markAsPaid(paying.id, payDate || undefined);
-    setPaying(null);
-    await load();
+    setPayError(null);
+    const amount = Number(payAmount.replace(/\./g, "").replace(",", "."));
+    if (!amount || amount <= 0) return setPayError("Informe o valor recebido.");
+    try {
+      const { settled, remaining } = await registerPayment(paying.id, amount, payDate || undefined);
+      setPaying(null);
+      setToast(
+        settled
+          ? "Cobrança quitada."
+          : `Pagamento parcial registrado. Saldo: ${formatBRL(remaining)}.`
+      );
+      await load();
+    } catch (e) {
+      setPayError(e instanceof Error ? e.message : "Erro ao registrar pagamento.");
+    }
+  }
+
+  function exportCSV() {
+    const header = "Cliente;Documento;Telefone;Valor;Pago;Saldo;Venda;Parcelas;Vencimento;Status;Dias em atraso";
+    const rows = visible.map((c) => {
+      const paid = c.paid_total ?? 0;
+      const saldo = Number(c.amount) - paid;
+      const dias = c.status === "atrasado" ? daysOverdue(c.due_date) : 0;
+      const fmt = (v: number) => v.toFixed(2).replace(".", ",");
+      return [
+        c.clients?.name ?? "",
+        c.clients?.document ?? "",
+        c.clients?.phone ?? "",
+        fmt(Number(c.amount)),
+        fmt(paid),
+        fmt(saldo),
+        c.sale_date ? c.sale_date.split("-").reverse().join("/") : "",
+        c.installments,
+        c.due_date.split("-").reverse().join("/"),
+        c.status,
+        dias || "",
+      ].join(";");
+    });
+    const blob = new Blob(["\uFEFF" + [header, ...rows].join("\n")], {
+      type: "text/csv;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `cobrancas-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   async function handleDelete() {
@@ -281,6 +338,9 @@ return () => clearTimeout(t);
           </p>
         </div>
         <div className="flex gap-2">
+          <Button variant="secondary" onClick={exportCSV} disabled={visible.length === 0}>
+            <FileDown size={15} /> Exportar
+          </Button>
           <Button
             variant="secondary"
             onClick={() => { resetImport(); setImportOpen(true); }}
@@ -353,13 +413,20 @@ return () => clearTimeout(t);
               </TR>
             </THead>
             <TBody>
-              {visible.map((c) => {
+              {paginated.map((c) => {
                 const overdue = c.status === "atrasado" ? daysOverdue(c.due_date) : 0;
                 return (
                   <TR key={c.id}>
                     <TD>
                       <span className="flex items-center gap-2">
-                        <span className="font-medium">{c.clients?.name ?? "—"}</span>
+                        <span className="font-medium">
+                          {c.clients?.name ?? "—"}
+                          {c.clients?.phone && (
+                            <span className="block font-mono text-[11px] font-normal text-faint">
+                              {c.clients.phone}
+                            </span>
+                          )}
+                        </span>
                         {negotiatingIds.has(c.client_id) && (
                           <Link
                             href="/negociacao"
@@ -372,7 +439,14 @@ return () => clearTimeout(t);
                         )}
                       </span>
                     </TD>
-                    <TD className="font-mono">{formatBRL(Number(c.amount))}</TD>
+                    <TD className="font-mono">
+                      {formatBRL(Number(c.amount))}
+                      {(c.paid_total ?? 0) > 0 && c.status !== "pago" && (
+                        <span className="block text-[11px] text-accent">
+                          {formatBRL(c.paid_total ?? 0)} pago
+                        </span>
+                      )}
+                    </TD>
                     <TD className="hidden text-muted lg:table-cell">
                       {c.sale_date ? formatDate(c.sale_date) : "—"}
                     </TD>
@@ -397,6 +471,27 @@ return () => clearTimeout(t);
                       <div className="flex justify-end gap-1">
                         {c.status !== "pago" && (
                           <>
+                            {c.clients?.phone && (
+                              <a
+                                href={`https://wa.me/55${c.clients.phone}?text=${encodeURIComponent(
+                                  `Olá ${c.clients?.name ?? ""}! Consta em aberto o valor de ${formatBRL(
+                                    Number(c.amount) - (c.paid_total ?? 0)
+                                  )} com vencimento em ${formatDate(c.due_date)}. Podemos conversar sobre a regularização?`
+                                )}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                              >
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  aria-label="Cobrar no WhatsApp"
+                                  title="Cobrar no WhatsApp"
+                                  className="hover:bg-accent-soft hover:text-accent"
+                                >
+                                  <MessageCircle size={14} />
+                                </Button>
+                              </a>
+                            )}
                             <Button
                               variant="ghost"
                               size="icon"
@@ -432,6 +527,34 @@ return () => clearTimeout(t);
           </Table>
         )}
       </Card>
+
+      {/* Paginação */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between border-t border-border px-5 py-3">
+          <p className="text-xs text-faint">
+            {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, visible.length)} de{" "}
+            {visible.length} cobranças
+          </p>
+          <div className="flex gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => p - 1)}
+            >
+              ← Anterior
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={page >= totalPages}
+              onClick={() => setPage((p) => p + 1)}
+            >
+              Próxima →
+            </Button>
+          </div>
+        </div>
+      )}
 
       {toast && (
         <div className="fixed bottom-5 left-1/2 z-50 -translate-x-1/2 animate-fade-up rounded-md border border-border bg-surface px-4 py-2.5 text-sm text-fg shadow-pop">
@@ -652,21 +775,50 @@ return () => clearTimeout(t);
           <p className="text-sm text-muted">
             Cobrança de{" "}
             <span className="font-mono text-fg">{paying && formatBRL(Number(paying.amount))}</span>{" "}
-            de <span className="font-medium text-fg">{paying?.clients?.name}</span>.
+            de <span className="font-medium text-fg">{paying?.clients?.name}</span>
+            {(paying?.paid_total ?? 0) > 0 && (
+              <>
+                {" "}— já recebido{" "}
+                <span className="font-mono text-accent">
+                  {formatBRL(paying?.paid_total ?? 0)}
+                </span>
+              </>
+            )}
+            .
           </p>
-          <div>
-            <Label htmlFor="pay-date">Data do pagamento</Label>
-            <Input
-              id="pay-date"
-              type="date"
-              value={payDate}
-              onChange={(e) => setPayDate(e.target.value)}
-            />
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <Label htmlFor="pay-amount">Valor recebido (R$)</Label>
+              <Input
+                id="pay-amount"
+                className="font-mono"
+                inputMode="decimal"
+                value={payAmount}
+                onChange={(e) => setPayAmount(e.target.value)}
+              />
+              <p className="mt-1.5 text-xs text-faint">
+                Menor que o saldo = pagamento parcial.
+              </p>
+            </div>
+            <div>
+              <Label htmlFor="pay-date">Data do pagamento</Label>
+              <Input
+                id="pay-date"
+                type="date"
+                value={payDate}
+                onChange={(e) => setPayDate(e.target.value)}
+              />
+            </div>
           </div>
+          {payError && (
+            <p className="rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-sm text-danger">
+              {payError}
+            </p>
+          )}
           <div className="flex justify-end gap-2 pt-1">
             <Button variant="secondary" onClick={() => setPaying(null)}>Cancelar</Button>
             <Button variant="success" onClick={confirmPay}>
-              <CheckCircle2 size={14} /> Confirmar pagamento
+              <CheckCircle2 size={14} /> Confirmar
             </Button>
           </div>
         </div>
