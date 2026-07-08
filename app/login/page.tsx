@@ -16,6 +16,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [company, setCompany] = useState("");
+  const [phone, setPhone] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -68,7 +69,7 @@ export default function LoginPage() {
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
-        options: { data: { company: company.trim() } },
+        options: { data: { company: company.trim(), phone: phone.replace(/\D/g, "") } },
       });
       setLoading(false);
       if (error) {
@@ -124,15 +125,28 @@ export default function LoginPage() {
 
           <div className="space-y-4">
             {mode === "signup" && (
-              <div>
-                <Label htmlFor="company">Nome da empresa</Label>
-                <Input
-                  id="company"
-                  placeholder="Ex.: CréditoBI Ltda"
-                  value={company}
-                  onChange={(e) => setCompany(e.target.value)}
-                />
-              </div>
+              <>
+                <div>
+                  <Label htmlFor="company">Nome da empresa</Label>
+                  <Input
+                    id="company"
+                    placeholder="Ex.: Loja da Maria"
+                    value={company}
+                    onChange={(e) => setCompany(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="phone">Telefone / WhatsApp</Label>
+                  <Input
+                    id="phone"
+                    className="font-mono"
+                    inputMode="tel"
+                    placeholder="65999990000"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                  />
+                </div>
+              </>
             )}
             <div>
               <Label htmlFor="email">E-mail</Label>

@@ -1,0 +1,212 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { ShieldAlert, Ban, CheckCircle2, Users, Phone } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { formatDate } from "@/lib/utils";
+
+const ADMIN_EMAIL = "matheushenrique.0899@gmail.com";
+
+interface TenantRow {
+  id: string;
+  email: string;
+  full_name: string | null;
+  company: string | null;
+  phone: string | null;
+  created_at: string;
+  last_sign_in_at: string | null;
+  banned_until: string | null;
+}
+
+export default function AdminPage() {
+  const router = useRouter();
+  const [allowed, setAllowed] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [tenants, setTenants] = useState<TenantRow[]>([]);
+  const [acting, setActing] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function init() {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user || user.email !== ADMIN_EMAIL) {
+        router.replace("/dashboard");
+        return;
+      }
+      setAllowed(true);
+      await loadTenants();
+      setLoading(false);
+    }
+    init();
+  }, []);
+
+  async function loadTenants() {
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from("admin_users_view")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      setError("Sem permissão para carregar usuários. Rode o SQL da view no Supabase.");
+      setTenants([]);
+      return;
+    }
+    setTenants((data ?? []) as TenantRow[]);
+  }
+
+  async function toggleBan(tenant: TenantRow) {
+    setActing(tenant.id);
+    setError(null);
+    try {
+      const supabase = createClient();
+      const isBanned = !!tenant.banned_until && new Date(tenant.banned_until) > new Date();
+
+      if (isBanned) {
+        const { error } = await supabase.rpc("admin_unban_user", { target_id: tenant.id });
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.rpc("admin_ban_user", { target_id: tenant.id });
+        if (error) throw error;
+      }
+      await loadTenants();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Erro ao alterar status.");
+    } finally {
+      setActing(null);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="space-y-3 p-8">
+        {[...Array(4)].map((_, i) => (
+          <div key={i} className="h-12 animate-pulse rounded-lg bg-surface" />
+        ))}
+      </div>
+    );
+  }
+
+  if (!allowed) return null;
+
+  const active = tenants.filter((t) => !t.banned_until || new Date(t.banned_until) <= new Date()).length;
+  const banned = tenants.length - active;
+
+  return (
+    <div className="space-y-6">
+      <header className="flex items-center gap-3">
+        <ShieldAlert size={20} className="text-warn" />
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">Painel de administração</h1>
+          <p className="mt-0.5 text-sm text-muted">
+            {tenants.length} conta{tenants.length !== 1 ? "s" : ""} cadastrada{tenants.length !== 1 ? "s" : ""} —{" "}
+            {active} ativa{active !== 1 ? "s" : ""}{banned > 0 ? `, ${banned} desativada${banned !== 1 ? "s" : ""}` : ""}
+          </p>
+        </div>
+      </header>
+
+      {error && (
+        <div className="rounded-md border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger">
+          {error}
+        </div>
+      )}
+
+      <Card>
+        {tenants.length === 0 ? (
+          <div className="flex flex-col items-center gap-3 py-16 text-center">
+            <Users size={24} className="text-muted" />
+            <p className="text-sm text-muted">Nenhuma conta cadastrada ainda.</p>
+          </div>
+        ) : (
+          <Table>
+            <THead>
+              <TR>
+                <TH>Empresa / Usuário</TH>
+                <TH className="hidden md:table-cell">E-mail</TH>
+                <TH className="hidden lg:table-cell">Telefone</TH>
+                <TH className="hidden lg:table-cell">Cadastro</TH>
+                <TH className="hidden md:table-cell">Último acesso</TH>
+                <TH>Status</TH>
+                <TH className="text-right">Ação</TH>
+              </TR>
+            </THead>
+            <TBody>
+              {tenants.map((t) => {
+                const isBanned = !!t.banned_until && new Date(t.banned_until) > new Date();
+                const isMe = t.email === ADMIN_EMAIL;
+                return (
+                  <TR key={t.id} className={isBanned ? "opacity-50" : ""}>
+                    <TD>
+                      <span className="font-medium">{t.company || t.full_name || "—"}</span>
+                      {t.company && t.full_name && (
+                        <span className="block text-xs text-muted">{t.full_name}</span>
+                      )}
+                      {isMe && (
+                        <span className="mt-0.5 inline-block rounded-full bg-accent-soft px-2 py-0.5 text-[10px] font-medium text-accent">
+                          você
+                        </span>
+                      )}
+                    </TD>
+                    <TD className="hidden text-muted md:table-cell">{t.email}</TD>
+                    <TD className="hidden lg:table-cell">
+                      {t.phone ? (
+                        <span className="flex items-center gap-1 font-mono text-sm text-muted">
+                          <Phone size={12} /> {t.phone}
+                        </span>
+                      ) : (
+                        <span className="text-faint">—</span>
+                      )}
+                    </TD>
+                    <TD className="hidden text-muted lg:table-cell">
+                      {formatDate(t.created_at)}
+                    </TD>
+                    <TD className="hidden text-muted md:table-cell">
+                      {t.last_sign_in_at ? formatDate(t.last_sign_in_at) : "Nunca"}
+                    </TD>
+                    <TD>
+                      <span
+                        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${
+                          isBanned
+                            ? "border-danger/25 bg-danger-soft text-danger"
+                            : "border-accent/25 bg-accent-soft text-accent"
+                        }`}
+                      >
+                        <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                        {isBanned ? "Desativada" : "Ativa"}
+                      </span>
+                    </TD>
+                    <TD>
+                      {!isMe && (
+                        <div className="flex justify-end">
+                          <Button
+                            variant={isBanned ? "success" : "danger"}
+                            size="sm"
+                            disabled={acting === t.id}
+                            onClick={() => toggleBan(t)}
+                          >
+                            {acting === t.id ? (
+                              "Aguarde..."
+                            ) : isBanned ? (
+                              <><CheckCircle2 size={13} /> Reativar</>
+                            ) : (
+                              <><Ban size={13} /> Desativar</>
+                            )}
+                          </Button>
+                        </div>
+                      )}
+                    </TD>
+                  </TR>
+                );
+              })}
+            </TBody>
+          </Table>
+        )}
+      </Card>
+    </div>
+  );
+}

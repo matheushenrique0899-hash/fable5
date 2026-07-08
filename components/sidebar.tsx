@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, Users, Receipt, Handshake, LogOut, Menu, X } from "lucide-react";
+import { LayoutDashboard, Users, Receipt, Handshake, LogOut, Menu, X, ShieldAlert } from "lucide-react";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
@@ -13,6 +13,8 @@ const NAV = [
   { href: "/cobrancas", label: "Cobranças", icon: Receipt },
   { href: "/negociacao", label: "Negociação", icon: Handshake },
 ];
+
+const ADMIN_EMAIL = "matheushenrique.0899@gmail.com";
 
 export function Sidebar({ email }: { email: string }) {
   const pathname = usePathname();
