@@ -106,6 +106,7 @@ export default function CobrancasPage() {
   const [skipDuplicates, setSkipDuplicates] = useState(true);
   const [batches, setBatches] = useState<ImportBatch[]>([]);
   const [deletingBatch, setDeletingBatch] = useState<string | null>(null);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
 
   // Reset página quando filtro ou busca muda
   useEffect(() => { setPage(1); }, [filter, agingFilter, search, sortBy]);
@@ -347,8 +348,14 @@ return () => clearTimeout(t);
   async function confirmImport() {
     if (!preview) return;
     setImporting(true);
+    setProgress({ done: 0, total: 0 });
     try {
-      const result = await importNegotiations(preview, importFileName, skipDuplicates);
+      const result = await importNegotiations(
+        preview,
+        importFileName,
+        skipDuplicates,
+        (done, total) => setProgress({ done, total })
+      );
       result.errors = [...previewErrors, ...result.errors];
       setImportResult(result);
       setPreview(null);
@@ -359,6 +366,7 @@ return () => clearTimeout(t);
       setImportError(e instanceof Error ? e.message : "Erro ao importar.");
     } finally {
       setImporting(false);
+      setProgress(null);
     }
   }
 
@@ -858,10 +866,27 @@ return () => clearTimeout(t);
                     {previewErrors.length} linha(s) serão ignoradas — ex.: {previewErrors[0]}
                   </p>
                 )}
+                {importing && progress && progress.total > 0 && (
+                  <div className="space-y-1">
+                    <div className="h-2 overflow-hidden rounded-full bg-raised">
+                      <div
+                        className="h-full rounded-full bg-accent transition-all"
+                        style={{ width: `${Math.round((progress.done / progress.total) * 100)}%` }}
+                      />
+                    </div>
+                    <p className="text-center text-xs text-faint">
+                      {Math.round((progress.done / progress.total) * 100)}% concluído
+                    </p>
+                  </div>
+                )}
                 <div className="flex justify-end gap-2 pt-1">
-                  <Button variant="secondary" onClick={resetImport}>Escolher outro arquivo</Button>
+                  <Button variant="secondary" onClick={resetImport} disabled={importing}>Escolher outro arquivo</Button>
                   <Button onClick={confirmImport} disabled={importing || willImport === 0}>
-                    {importing ? "Importando..." : `Confirmar importação (${willImport})`}
+                    {importing
+                      ? progress && progress.total > 0
+                        ? `Importando ${progress.done} de ${progress.total}...`
+                        : "Preparando..."
+                      : `Confirmar importação (${willImport})`}
                   </Button>
                 </div>
               </>

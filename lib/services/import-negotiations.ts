@@ -155,13 +155,17 @@ export async function checkDuplicates(rows: ImportNegRow[]): Promise<ImportNegRo
 export async function importNegotiations(
   rows: ImportNegRow[],
   fileName: string,
-  skipDuplicates: boolean
+  skipDuplicates: boolean,
+  onProgress?: (done: number, total: number) => void
 ): Promise<ImportNegResult> {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Sessão expirada. Faça login novamente.");
 
   const toImport = skipDuplicates ? rows.filter((r) => !r.isDuplicate) : rows;
+  const total = toImport.length;
+  const errors: string[] = [];
+  let skipped = 0;
 
   // Cria o lote
   const { data: batch, error: be } = await supabase
@@ -169,7 +173,7 @@ export async function importNegotiations(
     .insert({
       owner_id: user.id,
       file_name: fileName,
-      row_count: toImport.length,
+      row_count: total,
       total_amount: toImport.reduce((s, r) => s + r.total, 0),
     })
     .select("id")
@@ -177,55 +181,105 @@ export async function importNegotiations(
   if (be) throw be;
   const batchId = batch.id;
 
-  let created = 0;
-  let skipped = 0;
-  const errors: string[] = [];
+  // ---- Passo 1: resolver clientes ----
+  // Normaliza documento (código do ERP) e mapeia linha -> docKey
+  const withDoc = toImport.map((r) => ({
+    row: r,
+    docKey: r.code.replace(/\D/g, "").padStart(11, "0").slice(0, 11),
+  }));
 
-  for (const row of toImport) {
-    try {
-      const docKey = row.code.replace(/\D/g, "").padStart(11, "0").slice(0, 11);
+  // Busca TODOS os clientes já existentes desses documentos numa query só
+  const uniqueDocs = Array.from(new Set(withDoc.map((w) => w.docKey)));
+  const docToClientId = new Map<string, string>();
+  const docHasPhone = new Map<string, boolean>();
 
-      let clientId: string;
-      const { data: existing } = await supabase
+  // Busca em blocos de 200 documentos (limite de URL do .in())
+  for (let i = 0; i < uniqueDocs.length; i += 200) {
+    const chunk = uniqueDocs.slice(i, i + 200);
+    const { data: existing } = await supabase
+      .from("clients")
+      .select("id, document, phone")
+      .eq("owner_id", user.id)
+      .in("document", chunk);
+    (existing ?? []).forEach((c) => {
+      docToClientId.set(c.document, c.id);
+      docHasPhone.set(c.document, !!c.phone);
+    });
+  }
+
+  // Cria os clientes que ainda não existem, em lote
+  const newClientDocs = uniqueDocs.filter((d) => !docToClientId.has(d));
+  if (newClientDocs.length > 0) {
+    // Para cada doc novo, pega o nome/telefone da primeira linha correspondente
+    const newClientsPayload = newClientDocs.map((doc) => {
+      const w = withDoc.find((x) => x.docKey === doc)!;
+      return {
+        owner_id: user.id,
+        name: w.row.name,
+        document: doc,
+        phone: w.row.phone,
+      };
+    });
+    for (let i = 0; i < newClientsPayload.length; i += 500) {
+      const chunk = newClientsPayload.slice(i, i + 500);
+      const { data: inserted, error: ce } = await supabase
         .from("clients")
-        .select("id, phone")
-        .eq("owner_id", user.id)
-        .eq("document", docKey)
-        .maybeSingle();
-
-      if (existing) {
-        clientId = existing.id;
-        if (!existing.phone && row.phone) {
-          await supabase.from("clients").update({ phone: row.phone }).eq("id", clientId);
-        }
+        .insert(chunk)
+        .select("id, document");
+      if (ce) {
+        errors.push(`Erro ao criar clientes: ${ce.message}`);
       } else {
-        const { data: newClient, error: ce } = await supabase
-          .from("clients")
-          .insert({ owner_id: user.id, name: row.name, document: docKey, phone: row.phone })
-          .select("id")
-          .single();
-        if (ce) { errors.push(`${row.name}: ${ce.message}`); skipped++; continue; }
-        clientId = newClient.id;
+        (inserted ?? []).forEach((c) => docToClientId.set(c.document, c.id));
       }
+    }
+  }
 
-      const { error: che } = await supabase.from("charges").insert({
+  // Completa telefone de clientes que existiam sem telefone
+  const phoneUpdates = withDoc.filter(
+    (w) => docToClientId.has(w.docKey) && docHasPhone.get(w.docKey) === false && w.row.phone
+  );
+  for (const w of phoneUpdates) {
+    await supabase.from("clients").update({ phone: w.row.phone }).eq("id", docToClientId.get(w.docKey)!);
+    docHasPhone.set(w.docKey, true); // evita repetir
+  }
+
+  // ---- Passo 2: inserir cobranças em lote ----
+  const chargesPayload = withDoc
+    .map((w) => {
+      const clientId = docToClientId.get(w.docKey);
+      if (!clientId) {
+        errors.push(`${w.row.name}: cliente não pôde ser criado`);
+        skipped++;
+        return null;
+      }
+      return {
         owner_id: user.id,
         client_id: clientId,
-        amount: row.total,
-        due_date: row.newest_due,
-        sale_date: row.sale_date,
+        amount: w.row.total,
+        due_date: w.row.newest_due,
+        sale_date: w.row.sale_date,
         installments: 1,
-        description: `Saldo devedor importado (cód. ${row.code})`,
-        observation: row.observation,
+        description: `Saldo devedor importado (cód. ${w.row.code})`,
+        observation: w.row.observation,
         import_batch_id: batchId,
-      });
-      if (che) { errors.push(`${row.name}: cobrança (${che.message})`); skipped++; continue; }
+      };
+    })
+    .filter((c): c is NonNullable<typeof c> => c !== null);
 
-      created++;
-    } catch (e) {
-      errors.push(`${row.name}: ${e instanceof Error ? e.message : "erro"}`);
-      skipped++;
+  let created = 0;
+  const BATCH = 500;
+  for (let i = 0; i < chargesPayload.length; i += BATCH) {
+    const chunk = chargesPayload.slice(i, i + BATCH);
+    const { error: che, count } = await supabase
+      .from("charges")
+      .insert(chunk, { count: "exact" });
+    if (che) {
+      errors.push(`Erro ao inserir lote de cobranças: ${che.message}`);
+      skipped += chunk.length;
+    } else {
+      created += count ?? chunk.length;
     }
+    onProgress?.(Math.min(i + BATCH, chargesPayload.length), total);
   }
 
   return { created, skipped, errors, batchId };
