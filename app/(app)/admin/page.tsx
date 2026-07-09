@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ShieldAlert, Ban, CheckCircle2, Users, Phone, Trash2 } from "lucide-react";
+import { ShieldAlert, Ban, CheckCircle2, Users, Phone, Trash2, UserCheck, Clock } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,7 @@ interface TenantRow {
   created_at: string;
   last_sign_in_at: string | null;
   banned_until: string | null;
+  approved: boolean | null;
 }
 
 export default function AdminPage() {
@@ -89,6 +90,22 @@ export default function AdminPage() {
     }
   }
 
+  async function toggleApproval(tenant: TenantRow) {
+    setActing(tenant.id);
+    setError(null);
+    try {
+      const supabase = createClient();
+      const fn = tenant.approved ? "admin_revoke_user" : "admin_approve_user";
+      const { error } = await supabase.rpc(fn, { target_id: tenant.id });
+      if (error) throw error;
+      await loadTenants();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Erro ao alterar aprovação.");
+    } finally {
+      setActing(null);
+    }
+  }
+
   function openDelete(tenant: TenantRow) {
     setDeleting(tenant);
     setConfirmEmail("");
@@ -130,6 +147,7 @@ export default function AdminPage() {
 
   const active = tenants.filter((t) => !t.banned_until || new Date(t.banned_until) <= new Date()).length;
   const banned = tenants.length - active;
+  const pending = tenants.filter((t) => !t.approved).length;
 
   return (
     <div className="space-y-6">
@@ -150,6 +168,13 @@ export default function AdminPage() {
         </div>
       )}
 
+      {pending > 0 && (
+        <div className="flex items-center gap-2 rounded-md border border-warn/30 bg-warn-soft px-4 py-3 text-sm text-warn">
+          <Clock size={15} />
+          {pending} {pending === 1 ? "conta aguardando aprovação" : "contas aguardando aprovação"}.
+        </div>
+      )}
+
       <Card>
         {tenants.length === 0 ? (
           <div className="flex flex-col items-center gap-3 py-16 text-center">
@@ -165,8 +190,9 @@ export default function AdminPage() {
                 <TH className="hidden lg:table-cell">Telefone</TH>
                 <TH className="hidden lg:table-cell">Cadastro</TH>
                 <TH className="hidden md:table-cell">Último acesso</TH>
+                <TH>Aprovação</TH>
                 <TH>Status</TH>
-                <TH className="text-right">Ação</TH>
+                <TH className="text-right">Ações</TH>
               </TR>
             </THead>
             <TBody>
@@ -203,6 +229,19 @@ export default function AdminPage() {
                       {t.last_sign_in_at ? formatDate(t.last_sign_in_at) : "Nunca"}
                     </TD>
                     <TD>
+                      {t.approved ? (
+                        <span className="inline-flex items-center gap-1.5 rounded-full border border-accent/25 bg-accent-soft px-2.5 py-0.5 text-xs font-medium text-accent">
+                          <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                          Aprovada
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 rounded-full border border-warn/25 bg-warn-soft px-2.5 py-0.5 text-xs font-medium text-warn">
+                          <Clock size={11} />
+                          Aguardando
+                        </span>
+                      )}
+                    </TD>
+                    <TD>
                       <span
                         className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${
                           isBanned
@@ -217,6 +256,26 @@ export default function AdminPage() {
                     <TD>
                       {!isMe && (
                         <div className="flex justify-end gap-1.5">
+                          {!t.approved ? (
+                            <Button
+                              variant="primary"
+                              size="sm"
+                              disabled={acting === t.id}
+                              onClick={() => toggleApproval(t)}
+                            >
+                              {acting === t.id ? "..." : <><UserCheck size={13} /> Aprovar</>}
+                            </Button>
+                          ) : (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={acting === t.id}
+                              onClick={() => toggleApproval(t)}
+                              title="Revogar aprovação"
+                            >
+                              Revogar
+                            </Button>
+                          )}
                           <Button
                             variant={isBanned ? "success" : "secondary"}
                             size="sm"

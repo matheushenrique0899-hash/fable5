@@ -167,6 +167,19 @@ export async function importNegotiations(
   const errors: string[] = [];
   let skipped = 0;
 
+  // Limite de segurança: máximo de cobranças por conta
+  const CHARGE_LIMIT = 50000;
+  const { count: currentCount } = await supabase
+    .from("charges")
+    .select("id", { count: "exact", head: true });
+  if ((currentCount ?? 0) + total > CHARGE_LIMIT) {
+    throw new Error(
+      `Limite de ${CHARGE_LIMIT.toLocaleString("pt-BR")} cobranças por conta atingido. ` +
+      `Você tem ${(currentCount ?? 0).toLocaleString("pt-BR")} e tentou adicionar ${total.toLocaleString("pt-BR")}. ` +
+      `Exclua importações antigas ou fale com o administrador.`
+    );
+  }
+
   // Cria o lote
   const { data: batch, error: be } = await supabase
     .from("import_batches")

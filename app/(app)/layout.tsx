@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { Sidebar } from "@/components/sidebar";
+import { PendingApproval } from "@/components/pending-approval";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const supabase = createClient();
@@ -9,6 +10,19 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   } = await supabase.auth.getUser();
 
   if (!user) redirect("/login");
+
+  // Verifica se a conta foi aprovada pelo admin
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("approved")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  const approved = profile?.approved ?? false;
+
+  if (!approved) {
+    return <PendingApproval email={user.email ?? ""} />;
+  }
 
   return (
     <div className="min-h-screen">

@@ -44,6 +44,14 @@ export async function createCharge(input: {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Sessão expirada. Faça login novamente.");
+
+  const { count } = await supabase
+    .from("charges")
+    .select("id", { count: "exact", head: true });
+  if ((count ?? 0) >= 50000) {
+    throw new Error("Limite de 50.000 cobranças por conta atingido.");
+  }
+
   const { error } = await supabase.from("charges").insert({
     owner_id: user.id,
     client_id: input.client_id,
