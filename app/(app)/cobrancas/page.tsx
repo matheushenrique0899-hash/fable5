@@ -526,10 +526,10 @@ return () => clearTimeout(t);
               <TR>
                 <TH>Cliente</TH>
                 <TH>Valor</TH>
-                <TH className="hidden md:table-cell">Venda</TH>
-                <TH className="hidden xl:table-cell">Parc.</TH>
+                <TH className="hidden lg:table-cell">Venda</TH>
+                <TH className="hidden 2xl:table-cell">Parc.</TH>
                 <TH>Vencimento</TH>
-                <TH className="hidden lg:table-cell">Observação</TH>
+                <TH className="hidden 2xl:table-cell">Obs.</TH>
                 <TH>Status</TH>
                 <TH className="text-right">Ações</TH>
               </TR>
@@ -569,10 +569,10 @@ return () => clearTimeout(t);
                         </span>
                       )}
                     </TD>
-                    <TD className="hidden text-muted md:table-cell">
+                    <TD className="hidden text-muted lg:table-cell">
                       {c.sale_date ? formatDate(c.sale_date) : "—"}
                     </TD>
-                    <TD className="hidden font-mono text-muted xl:table-cell">
+                    <TD className="hidden font-mono text-muted 2xl:table-cell">
                       {c.installments}x
                     </TD>
                     <TD>
@@ -588,7 +588,7 @@ return () => clearTimeout(t);
                         </span>
                       )}
                     </TD>
-                    <TD className="hidden max-w-[180px] lg:table-cell">
+                    <TD className="hidden max-w-[140px] 2xl:table-cell">
                       {c.observation ? (
                         <span className="block truncate text-xs text-muted" title={c.observation}>
                           {c.observation}
@@ -599,7 +599,7 @@ return () => clearTimeout(t);
                     </TD>
                     <TD><StatusBadge status={c.status} /></TD>
                     <TD>
-                      <div className="flex justify-end gap-1">
+                      <div className="flex justify-end gap-1 whitespace-nowrap">
                         {c.status !== "pago" && (
                           <>
                             {c.clients?.phone && (
