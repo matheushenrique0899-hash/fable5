@@ -2,10 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ShieldAlert, Ban, CheckCircle2, Users, Phone } from "lucide-react";
+import { ShieldAlert, Ban, CheckCircle2, Users, Phone, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { formatDate } from "@/lib/utils";
 
@@ -29,6 +32,10 @@ export default function AdminPage() {
   const [tenants, setTenants] = useState<TenantRow[]>([]);
   const [acting, setActing] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<TenantRow | null>(null);
+  const [confirmEmail, setConfirmEmail] = useState("");
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   useEffect(() => {
     async function init() {
@@ -79,6 +86,33 @@ export default function AdminPage() {
       setError(e instanceof Error ? e.message : "Erro ao alterar status.");
     } finally {
       setActing(null);
+    }
+  }
+
+  function openDelete(tenant: TenantRow) {
+    setDeleting(tenant);
+    setConfirmEmail("");
+    setDeleteError(null);
+  }
+
+  async function confirmDelete() {
+    if (!deleting) return;
+    setDeleteError(null);
+    if (confirmEmail.trim().toLowerCase() !== deleting.email.toLowerCase()) {
+      setDeleteError("O e-mail digitado não confere.");
+      return;
+    }
+    setDeleteLoading(true);
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.rpc("admin_delete_user", { target_id: deleting.id });
+      if (error) throw error;
+      setDeleting(null);
+      await loadTenants();
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : "Erro ao excluir conta.");
+    } finally {
+      setDeleteLoading(false);
     }
   }
 
@@ -182,9 +216,9 @@ export default function AdminPage() {
                     </TD>
                     <TD>
                       {!isMe && (
-                        <div className="flex justify-end">
+                        <div className="flex justify-end gap-1.5">
                           <Button
-                            variant={isBanned ? "success" : "danger"}
+                            variant={isBanned ? "success" : "secondary"}
                             size="sm"
                             disabled={acting === t.id}
                             onClick={() => toggleBan(t)}
@@ -197,6 +231,16 @@ export default function AdminPage() {
                               <><Ban size={13} /> Desativar</>
                             )}
                           </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label="Excluir conta"
+                            title="Excluir conta permanentemente"
+                            className="hover:bg-danger-soft hover:text-danger"
+                            onClick={() => openDelete(t)}
+                          >
+                            <Trash2 size={14} />
+                          </Button>
                         </div>
                       )}
                     </TD>
@@ -207,6 +251,51 @@ export default function AdminPage() {
           </Table>
         )}
       </Card>
+
+      {/* Confirmação de exclusão */}
+      <Dialog
+        open={!!deleting}
+        onClose={() => setDeleting(null)}
+        title="Excluir conta permanentemente"
+      >
+        <div className="space-y-4">
+          <div className="rounded-md border border-danger/30 bg-danger-soft px-3 py-2.5 text-sm text-danger">
+            <p className="font-medium">Esta ação é irreversível.</p>
+            <p className="mt-1">
+              Excluir <span className="font-semibold">{deleting?.company || deleting?.full_name || deleting?.email}</span>{" "}
+              apaga a conta e <span className="font-semibold">todos os dados</span>: clientes,
+              cobranças, negociações e importações. Não há como recuperar.
+            </p>
+          </div>
+          <div>
+            <Label htmlFor="confirm-email">
+              Para confirmar, digite o e-mail da conta:
+            </Label>
+            <Input
+              id="confirm-email"
+              className="font-mono"
+              placeholder={deleting?.email}
+              value={confirmEmail}
+              onChange={(e) => setConfirmEmail(e.target.value)}
+            />
+          </div>
+          {deleteError && (
+            <p className="rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-sm text-danger">
+              {deleteError}
+            </p>
+          )}
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="secondary" onClick={() => setDeleting(null)}>Cancelar</Button>
+            <Button
+              variant="danger"
+              disabled={deleteLoading || confirmEmail.trim().toLowerCase() !== (deleting?.email.toLowerCase() ?? "")}
+              onClick={confirmDelete}
+            >
+              {deleteLoading ? "Excluindo..." : "Excluir permanentemente"}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
     </div>
   );
 }
