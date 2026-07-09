@@ -27,9 +27,20 @@ export interface Charge {
   status: ChargeStatus;
   description: string | null;
   paid_at: string | null;
+  observation: string | null;
+  import_batch_id: string | null;
   created_at: string;
   clients?: { name: string; document: string; phone?: string | null } | null;
   paid_total?: number; // soma dos pagamentos parciais (calculado no service)
+}
+
+export interface ImportBatch {
+  id: string;
+  owner_id: string;
+  file_name: string | null;
+  row_count: number;
+  total_amount: number;
+  created_at: string;
 }
 
 export interface ChargePayment {

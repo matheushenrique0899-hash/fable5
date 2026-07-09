@@ -18,11 +18,15 @@ import Link from "next/link";
 import {
   parseNegotiationsCSV,
   importNegotiations,
+  checkDuplicates,
   readCsvFile,
+  listImportBatches,
+  deleteImportBatch,
   NEG_CSV_TEMPLATE,
   type ImportNegRow,
   type ImportNegResult,
 } from "@/lib/services/import-negotiations";
+import type { ImportBatch } from "@/lib/types";
 import type { Charge, ChargeStatus } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -61,6 +65,7 @@ const emptyForm = {
   installments: "1",
   description: "",
   phone: "",
+  observation: "",
 };
 
 export default function CobrancasPage() {
@@ -73,7 +78,7 @@ export default function CobrancasPage() {
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 20;
   const [search, setSearch] = useState("");
-  const [sortBy, setSortBy] = useState<"oldest" | "newest" | "highest" | "lowest">("oldest");
+  const [sortBy, setSortBy] = useState<"oldest" | "newest" | "highest" | "lowest">("newest");
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Charge | null>(null);
@@ -97,6 +102,10 @@ export default function CobrancasPage() {
   const [previewErrors, setPreviewErrors] = useState<string[]>([]);
   const [importResult, setImportResult] = useState<ImportNegResult | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
+  const [importFileName, setImportFileName] = useState("");
+  const [skipDuplicates, setSkipDuplicates] = useState(true);
+  const [batches, setBatches] = useState<ImportBatch[]>([]);
+  const [deletingBatch, setDeletingBatch] = useState<string | null>(null);
 
   // Reset página quando filtro ou busca muda
   useEffect(() => { setPage(1); }, [filter, agingFilter, search, sortBy]);
@@ -182,6 +191,7 @@ return () => clearTimeout(t);
       installments: String(c.installments ?? 1),
       description: c.description ?? "",
       phone: c.clients?.phone ?? "",
+      observation: c.observation ?? "",
     });
     setFormError(null);
     setDialogOpen(true);
@@ -205,6 +215,7 @@ return () => clearTimeout(t);
         sale_date: form.sale_date || undefined,
         installments: Math.max(parseInt(form.installments) || 1, 1),
         description: form.description,
+        observation: form.observation,
       };
       if (editing) {
         await updateCharge(editing.id, payload);
@@ -309,10 +320,15 @@ return () => clearTimeout(t);
     setPreviewErrors([]);
     setImportResult(null);
     setImportError(null);
+    setImportFileName("");
+    listImportBatches().then(setBatches).catch(() => setBatches([]));
   }
 
   async function handleImportFile(file: File) {
-    resetImport();
+    setPreview(null);
+    setImportResult(null);
+    setImportError(null);
+    setImportFileName(file.name);
     try {
       const text = await readCsvFile(file);
       const { rows, errors } = parseNegotiationsCSV(text);
@@ -320,7 +336,8 @@ return () => clearTimeout(t);
         setImportError(errors[0] ?? "Nenhuma linha válida encontrada no arquivo.");
         return;
       }
-      setPreview(rows);
+      const checked = await checkDuplicates(rows);
+      setPreview(checked);
       setPreviewErrors(errors);
     } catch (e) {
       setImportError(e instanceof Error ? e.message : "Erro ao ler o arquivo.");
@@ -331,16 +348,31 @@ return () => clearTimeout(t);
     if (!preview) return;
     setImporting(true);
     try {
-      const result = await importNegotiations(preview);
+      const result = await importNegotiations(preview, importFileName, skipDuplicates);
       result.errors = [...previewErrors, ...result.errors];
       setImportResult(result);
       setPreview(null);
       setToast(`${result.created} cobrança(s) importada(s).`);
       await load();
+      listImportBatches().then(setBatches).catch(() => {});
     } catch (e) {
       setImportError(e instanceof Error ? e.message : "Erro ao importar.");
     } finally {
       setImporting(false);
+    }
+  }
+
+  async function handleDeleteBatch(batchId: string) {
+    setDeletingBatch(batchId);
+    try {
+      const removed = await deleteImportBatch(batchId);
+      setToast(`Importação excluída: ${removed} cobrança(s) removida(s).`);
+      setBatches(await listImportBatches());
+      await load();
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : "Erro ao excluir importação.");
+    } finally {
+      setDeletingBatch(null);
     }
   }
 
@@ -396,8 +428,8 @@ return () => clearTimeout(t);
           onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
           className="h-9 w-auto text-xs"
         >
-          <option value="oldest">Mais antigo</option>
-          <option value="newest">Mais novo</option>
+          <option value="newest">Vencimento mais recente</option>
+          <option value="oldest">Vencimento mais antigo</option>
           <option value="highest">Maior valor</option>
           <option value="lowest">Menor valor</option>
         </Select>
@@ -497,6 +529,7 @@ return () => clearTimeout(t);
                 <TH className="hidden md:table-cell">Venda</TH>
                 <TH className="hidden xl:table-cell">Parc.</TH>
                 <TH>Vencimento</TH>
+                <TH className="hidden lg:table-cell">Observação</TH>
                 <TH>Status</TH>
                 <TH className="text-right">Ações</TH>
               </TR>
@@ -553,6 +586,15 @@ return () => clearTimeout(t);
                         <span className="ml-2 font-mono text-xs text-accent">
                           pago {formatDate(c.paid_at)}
                         </span>
+                      )}
+                    </TD>
+                    <TD className="hidden max-w-[180px] lg:table-cell">
+                      {c.observation ? (
+                        <span className="block truncate text-xs text-muted" title={c.observation}>
+                          {c.observation}
+                        </span>
+                      ) : (
+                        <span className="text-faint">—</span>
                       )}
                     </TD>
                     <TD><StatusBadge status={c.status} /></TD>
@@ -666,21 +708,21 @@ return () => clearTimeout(t);
         </div>
       )}
 
-      {/* Importar planilha do ERP (com preview) */}
+      {/* Importar planilha do ERP (com preview + lotes) */}
       <Dialog
         open={importOpen}
         onClose={() => setImportOpen(false)}
         title="Importar carteira de cobrança"
-        className="max-w-2xl"
+        className="max-w-3xl"
       >
         <div className="space-y-4">
           {!preview && !importResult && (
             <>
               <p className="text-sm text-muted">
                 Exporte do ERP, ajuste os cabeçalhos para{" "}
-                <span className="font-mono text-xs text-fg">Código; Nome; Total; Venda; Vencimento; Telefone</span>{" "}
-                e salve como CSV. O sistema agrupa por código, soma o saldo devedor e cria o
-                cliente + a cobrança. Parcelas e negociação você define depois, linha a linha.
+                <span className="font-mono text-xs text-fg">Código; Nome; Total; Data da Venda; Vencimento; Telefone; Observação</span>{" "}
+                e salve como CSV. Telefone e Observação são opcionais. O sistema agrupa por
+                código, soma o saldo e usa a data mais recente.
               </p>
               <div className="flex flex-wrap gap-2">
                 <Button variant="secondary" size="sm" onClick={downloadNegTemplate}>
@@ -701,6 +743,45 @@ return () => clearTimeout(t);
                   />
                 </label>
               </div>
+
+              {/* Histórico de lotes */}
+              {batches.length > 0 && (
+                <div className="mt-2 border-t border-border pt-4">
+                  <p className="mb-2 text-xs font-medium uppercase tracking-wide text-faint">
+                    Importações anteriores
+                  </p>
+                  <div className="max-h-48 space-y-1.5 overflow-y-auto">
+                    {batches.map((b) => (
+                      <div
+                        key={b.id}
+                        className="flex items-center justify-between rounded-md border border-border bg-bg px-3 py-2 text-sm"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate font-medium text-fg">
+                            {b.file_name || "Importação"}
+                          </p>
+                          <p className="text-xs text-faint">
+                            {formatDate(b.created_at)} · {b.row_count} cobranças ·{" "}
+                            <span className="font-mono">{formatBRL(Number(b.total_amount))}</span>
+                          </p>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="shrink-0 hover:bg-danger-soft hover:text-danger"
+                          disabled={deletingBatch === b.id}
+                          onClick={() => handleDeleteBatch(b.id)}
+                        >
+                          {deletingBatch === b.id ? "Excluindo..." : <><Trash2 size={13} /> Excluir</>}
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-2 text-xs text-faint">
+                    Excluir uma importação remove todas as cobranças dela.
+                  </p>
+                </div>
+              )}
             </>
           )}
 
@@ -710,56 +791,84 @@ return () => clearTimeout(t);
             </p>
           )}
 
-          {/* PREVIEW antes de confirmar */}
-          {preview && (
-            <>
-              <div className="flex items-baseline justify-between">
-                <p className="text-sm font-medium text-fg">
-                  Prévia: {preview.length} {preview.length === 1 ? "cliente" : "clientes"}
-                </p>
-                <p className="font-mono text-sm text-accent">
-                  {formatBRL(preview.reduce((s, r) => s + r.total, 0))}
-                </p>
-              </div>
-              <div className="max-h-64 overflow-y-auto rounded-md border border-border">
-                <table className="w-full text-xs">
-                  <thead className="sticky top-0 border-b border-border bg-surface">
-                    <tr>
-                      <th className="px-3 py-2 text-left font-medium uppercase tracking-wide text-faint">Cód.</th>
-                      <th className="px-3 py-2 text-left font-medium uppercase tracking-wide text-faint">Nome</th>
-                      <th className="px-3 py-2 text-right font-medium uppercase tracking-wide text-faint">Total</th>
-                      <th className="px-3 py-2 text-left font-medium uppercase tracking-wide text-faint">Venda</th>
-                      <th className="px-3 py-2 text-left font-medium uppercase tracking-wide text-faint">Venc.</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border/60">
-                    {preview.map((r) => (
-                      <tr key={r.code}>
-                        <td className="px-3 py-2 font-mono text-muted">{r.code}</td>
-                        <td className="px-3 py-2 text-fg">{r.name}</td>
-                        <td className="px-3 py-2 text-right font-mono text-fg">{formatBRL(r.total)}</td>
-                        <td className="px-3 py-2 font-mono text-muted">{formatDate(r.sale_date)}</td>
-                        <td className="px-3 py-2 font-mono text-muted">{formatDate(r.oldest_due)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {previewErrors.length > 0 && (
-                <p className="text-xs text-warn">
-                  {previewErrors.length} linha(s) serão ignoradas — ex.: {previewErrors[0]}
-                </p>
-              )}
-              <div className="flex justify-end gap-2 pt-1">
-                <Button variant="secondary" onClick={resetImport}>Escolher outro arquivo</Button>
-                <Button onClick={confirmImport} disabled={importing}>
-                  {importing ? "Importando..." : `Confirmar importação (${preview.length})`}
-                </Button>
-              </div>
-            </>
-          )}
+          {/* PREVIEW */}
+          {preview && (() => {
+            const dupCount = preview.filter((r) => r.isDuplicate).length;
+            const willImport = skipDuplicates ? preview.filter((r) => !r.isDuplicate).length : preview.length;
+            return (
+              <>
+                <div className="flex items-baseline justify-between">
+                  <p className="text-sm font-medium text-fg">
+                    Prévia: {preview.length} {preview.length === 1 ? "cliente" : "clientes"}
+                  </p>
+                  <p className="font-mono text-sm text-accent">
+                    {formatBRL(preview.reduce((s, r) => s + r.total, 0))}
+                  </p>
+                </div>
 
-          {/* Resultado */}
+                {dupCount > 0 && (
+                  <div className="rounded-md border border-warn/30 bg-warn-soft px-3 py-2.5 text-sm">
+                    <p className="font-medium text-warn">
+                      {dupCount} {dupCount === 1 ? "cobrança idêntica já existe" : "cobranças idênticas já existem"} (mesmo nome, valor, venda e vencimento).
+                    </p>
+                    <label className="mt-2 flex cursor-pointer items-center gap-2 text-xs text-fg">
+                      <input
+                        type="checkbox"
+                        checked={skipDuplicates}
+                        onChange={(e) => setSkipDuplicates(e.target.checked)}
+                        className="h-3.5 w-3.5 accent-[#159A63]"
+                      />
+                      Pular as duplicadas (recomendado) — importar apenas {willImport} nova(s)
+                    </label>
+                  </div>
+                )}
+
+                <div className="max-h-64 overflow-y-auto rounded-md border border-border">
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 border-b border-border bg-surface">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-medium uppercase tracking-wide text-faint">Cód.</th>
+                        <th className="px-3 py-2 text-left font-medium uppercase tracking-wide text-faint">Nome</th>
+                        <th className="px-3 py-2 text-right font-medium uppercase tracking-wide text-faint">Total</th>
+                        <th className="px-3 py-2 text-left font-medium uppercase tracking-wide text-faint">Venc.</th>
+                        <th className="px-3 py-2 text-left font-medium uppercase tracking-wide text-faint"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/60">
+                      {preview.map((r) => (
+                        <tr key={r.code} className={r.isDuplicate ? "opacity-50" : ""}>
+                          <td className="px-3 py-2 font-mono text-muted">{r.code}</td>
+                          <td className="px-3 py-2 text-fg">{r.name}</td>
+                          <td className="px-3 py-2 text-right font-mono text-fg">{formatBRL(r.total)}</td>
+                          <td className="px-3 py-2 font-mono text-muted">{formatDate(r.newest_due)}</td>
+                          <td className="px-3 py-2">
+                            {r.isDuplicate && (
+                              <span className="rounded-full bg-warn-soft px-2 py-0.5 text-[10px] font-medium text-warn">
+                                já existe
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {previewErrors.length > 0 && (
+                  <p className="text-xs text-warn">
+                    {previewErrors.length} linha(s) serão ignoradas — ex.: {previewErrors[0]}
+                  </p>
+                )}
+                <div className="flex justify-end gap-2 pt-1">
+                  <Button variant="secondary" onClick={resetImport}>Escolher outro arquivo</Button>
+                  <Button onClick={confirmImport} disabled={importing || willImport === 0}>
+                    {importing ? "Importando..." : `Confirmar importação (${willImport})`}
+                  </Button>
+                </div>
+              </>
+            );
+          })()}
+
+          {/* RESULTADO */}
           {importResult && (
             <>
               <div className="space-y-1.5 rounded-md border border-border bg-bg px-3 py-2.5 text-sm">
@@ -874,6 +983,15 @@ return () => clearTimeout(t);
               placeholder="Ex.: Parcela 2/6 — venda de insumos"
               value={form.description}
               onChange={(e) => setForm({ ...form, description: e.target.value })}
+            />
+          </div>
+          <div>
+            <Label htmlFor="ch-obs">Observação</Label>
+            <Textarea
+              id="ch-obs"
+              placeholder="Ex.: cliente pediu para ligar após as 18h"
+              value={form.observation}
+              onChange={(e) => setForm({ ...form, observation: e.target.value })}
             />
           </div>
           {formError && (

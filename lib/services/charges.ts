@@ -39,6 +39,7 @@ export async function createCharge(input: {
   sale_date?: string;
   installments?: number;
   description?: string;
+  observation?: string;
 }) {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -141,6 +142,7 @@ export async function updateCharge(id: string, input: {
   sale_date?: string;
   installments?: number;
   description?: string;
+  observation?: string;
 }) {
   const supabase = createClient();
   const { error } = await supabase.from("charges").update({
@@ -149,6 +151,7 @@ export async function updateCharge(id: string, input: {
     sale_date: input.sale_date || null,
     installments: input.installments ?? 1,
     description: input.description?.trim() || null,
+    observation: input.observation?.trim() || null,
   }).eq("id", id);
   if (error) throw error;
 }
