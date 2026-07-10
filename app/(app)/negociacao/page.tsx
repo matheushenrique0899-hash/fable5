@@ -1,8 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { Handshake, Pencil, Trash2, History, Plus, CheckCircle2, RotateCcw, Receipt, MessageCircle, ArrowRight } from "lucide-react";
+import { Handshake, Pencil, Trash2, History, Plus, CheckCircle2, RotateCcw } from "lucide-react";
 import {
   listNegotiations,
   updateNegotiation,
@@ -14,11 +13,10 @@ import {
   payInstallment,
   unpayInstallment,
   applyAgreementToCharges,
-  listCollectionPriorities,
 } from "@/lib/services/negotiations";
-import { refreshOverdue, ensureNegotiationForClient } from "@/lib/services/charges";
+import { refreshOverdue } from "@/lib/services/charges";
 import { listAllClientsLite } from "@/lib/services/clients";
-import type { Negotiation, NegotiationStatus, NegotiationContact, AgreementInstallment, NegotiationArgument, Charge } from "@/lib/types";
+import type { Negotiation, NegotiationStatus, NegotiationContact, AgreementInstallment, NegotiationArgument } from "@/lib/types";
 import { NEGOTIATION_LABELS, ARGUMENT_LABELS } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,7 +27,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { EmptyState } from "@/components/ui/empty-state";
-import { cn, daysOverdue, formatBRL, formatDate } from "@/lib/utils";
+import { cn, formatBRL, formatDate } from "@/lib/utils";
 
 type Filter = NegotiationStatus | "todas";
 
@@ -64,8 +62,6 @@ const emptyForm = {
 
 export default function NegociacaoPage() {
   const [all, setAll] = useState<Negotiation[]>([]);
-  const [priorities, setPriorities] = useState<Charge[]>([]);
-  const [priorityToast, setPriorityToast] = useState<string | null>(null);
   const [clients, setClients] = useState<{ id: string; name: string }[]>([]);
   const [filter, setFilter] = useState<Filter>("todas");
   const [loading, setLoading] = useState(true);
@@ -93,33 +89,14 @@ export default function NegociacaoPage() {
     setLoading(true);
     try {
       await refreshOverdue();
-      const [negotiations, prios] = await Promise.all([
-        listNegotiations("todas"),
-        listCollectionPriorities(10),
-      ]);
+      const negotiations = await listNegotiations("todas");
       setAll(negotiations);
-      setPriorities(prios as Charge[]);
     } finally {
       setLoading(false);
     }
   }, []);
 
-  async function handlePriorityNegotiation(c: Charge) {
-    try {
-      await ensureNegotiationForClient(c.client_id);
-      setPriorityToast(`Negociação criada para ${c.clients?.name ?? "o cliente"}.`);
-      await load();
-    } catch (e) {
-      setPriorityToast(e instanceof Error ? e.message : "Erro ao criar negociação.");
-    }
-  }
-
   useEffect(() => { load(); }, [load]);
-  useEffect(() => {
-    if (!priorityToast) return;
-    const t = setTimeout(() => setPriorityToast(null), 4000);
-    return () => clearTimeout(t);
-  }, [priorityToast]);
   useEffect(() => { listAllClientsLite().then(setClients); }, []);
 
   const filtered = filter === "todas" ? all : all.filter((n) => n.status === filter);
@@ -258,96 +235,6 @@ export default function NegociacaoPage() {
           </p>
         </div>
       </header>
-
-      {/* Prioridades de cobrança */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Prioridades de cobrança</CardTitle>
-          <Link
-            href="/cobrancas?status=atrasado"
-            className="flex items-center gap-1 text-xs font-medium text-accent hover:underline"
-          >
-            Ver todas <ArrowRight size={12} />
-          </Link>
-        </CardHeader>
-        {priorities.length === 0 ? (
-          <EmptyState
-            icon={<Receipt size={18} />}
-            title="Nada em atraso"
-            description="Nenhuma cobrança vencida na carteira. Bom trabalho."
-          />
-        ) : (
-          <Table>
-            <THead>
-              <TR>
-                <TH>Cliente</TH>
-                <TH className="text-right">Valor</TH>
-                <TH>Atraso</TH>
-                <TH className="text-right">Ações</TH>
-              </TR>
-            </THead>
-            <TBody>
-              {priorities.map((c) => {
-                const days = daysOverdue(c.due_date);
-                const phone = c.clients?.phone ?? null;
-                const waText = encodeURIComponent(
-                  `Olá ${c.clients?.name ?? ""}! Consta em aberto o valor de ${formatBRL(
-                    Number(c.amount)
-                  )} com vencimento em ${formatDate(c.due_date)}. Podemos conversar sobre a regularização?`
-                );
-                return (
-                  <TR key={c.id}>
-                    <TD className="font-medium">{c.clients?.name ?? "—"}</TD>
-                    <TD className="text-right font-mono">{formatBRL(Number(c.amount))}</TD>
-                    <TD>
-                      <span className="inline-flex items-center gap-1.5 rounded-full border border-danger/25 bg-danger-soft px-2.5 py-0.5 text-xs font-medium text-danger">
-                        <span className="h-1.5 w-1.5 rounded-full bg-current" />
-                        Atrasado há {days}d
-                      </span>
-                    </TD>
-                    <TD>
-                      <div className="flex justify-end gap-1">
-                        {phone ? (
-                          <a href={`https://wa.me/55${phone}?text=${waText}`} target="_blank" rel="noopener noreferrer">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              aria-label="Cobrar no WhatsApp"
-                              title="Cobrar no WhatsApp"
-                              className="hover:bg-accent-soft hover:text-accent"
-                            >
-                              <MessageCircle size={14} />
-                            </Button>
-                          </a>
-                        ) : (
-                          <Button variant="ghost" size="icon" disabled aria-label="Sem telefone cadastrado" title="Cliente sem telefone cadastrado">
-                            <MessageCircle size={14} />
-                          </Button>
-                        )}
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          aria-label="Criar negociação"
-                          title="Criar negociação para este cliente"
-                          onClick={() => handlePriorityNegotiation(c)}
-                        >
-                          <Handshake size={14} />
-                        </Button>
-                      </div>
-                    </TD>
-                  </TR>
-                );
-              })}
-            </TBody>
-          </Table>
-        )}
-      </Card>
-
-      {priorityToast && (
-        <div className="fixed bottom-5 left-1/2 z-50 -translate-x-1/2 animate-fade-up rounded-md border border-border bg-surface px-4 py-2.5 text-sm text-fg shadow-pop">
-          {priorityToast}
-        </div>
-      )}
 
       {/* Distribuição por status */}
       <Card>
