@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 interface StatCardProps {
   label: string;
   value: string;
-  hint?: string;
+  hint?: ReactNode;
   icon: ReactNode;
   tone?: "default" | "accent" | "warn" | "danger";
   href?: string;

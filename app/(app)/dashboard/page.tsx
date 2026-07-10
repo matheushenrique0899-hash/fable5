@@ -79,9 +79,30 @@ export default function DashboardPage() {
             <StatCard
               label="Em atraso"
               value={formatBRL(data.overdueAmount)}
-              hint={`${data.overdueCount} ${data.overdueCount === 1 ? "cobrança vencida" : "cobranças vencidas"}`}
+              hint={
+                <>
+                  {data.overdueCount} {data.overdueCount === 1 ? "cobrança vencida" : "cobranças vencidas"}
+                  {" · "}
+                  <span
+                    className={cn(
+                      "font-medium",
+                      data.overdueHealth.criticality === "saudavel" && "text-accent",
+                      data.overdueHealth.criticality === "alerta" && "text-warn",
+                      data.overdueHealth.criticality === "critico" && "text-danger"
+                    )}
+                  >
+                    {data.overdueHealth.label} ({data.overdueHealth.over90Pct}% acima de 90d)
+                  </span>
+                </>
+              }
               icon={<AlertTriangle size={15} />}
-              tone={data.overdueAmount > 0 ? "danger" : "default"}
+              tone={
+                data.overdueHealth.criticality === "critico"
+                  ? "danger"
+                  : data.overdueHealth.criticality === "alerta"
+                  ? "warn"
+                  : data.overdueAmount > 0 ? "danger" : "default"
+              }
               href="/cobrancas?status=atrasado"
             />
             <StatCard
@@ -126,9 +147,23 @@ export default function DashboardPage() {
           <Card>
             <CardHeader>
               <CardTitle>Aging da carteira</CardTitle>
-              <span className="font-mono text-xs text-faint">
-                {formatBRL(data.aging.reduce((s, b) => s + b.amount, 0))} em aberto
-              </span>
+              <div className="flex items-center gap-3">
+                <span
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium",
+                    data.overdueHealth.criticality === "saudavel" && "border-accent/25 bg-accent-soft text-accent",
+                    data.overdueHealth.criticality === "alerta" && "border-warn/25 bg-warn-soft text-warn",
+                    data.overdueHealth.criticality === "critico" && "border-danger/25 bg-danger-soft text-danger"
+                  )}
+                  title="Classificação baseada no % da carteira acima de 90 dias (benchmark de mercado)"
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                  {data.overdueHealth.label} · {data.overdueHealth.over90Pct}% over 90
+                </span>
+                <span className="font-mono text-xs text-faint">
+                  {formatBRL(data.aging.reduce((s, b) => s + b.amount, 0))} em aberto
+                </span>
+              </div>
             </CardHeader>
             <CardContent>
               <AgingBar aging={data.aging} />
@@ -274,23 +309,28 @@ function AgingBar({ aging }: { aging: { label: string; amount: number; count: nu
         })}
       </div>
       <div className="flex flex-wrap gap-x-5 gap-y-2">
-        {aging.map((b, i) => (
-          <Link
-            key={b.label}
-            href={AGING_LINKS[i]}
-            className={cn(
-              "group flex items-center gap-2 text-xs",
-              b.amount === 0 && "opacity-40"
-            )}
-          >
-            <span
-              className="h-2.5 w-2.5 rounded-sm"
-              style={{ backgroundColor: AGING_COLORS[i] }}
-            />
-            <span className="text-muted group-hover:text-fg">{b.label}</span>
-            <span className="font-mono text-faint">{formatBRL(b.amount)}</span>
-          </Link>
-        ))}
+        {aging.map((b, i) => {
+          const pct = total > 0 ? Math.round((b.amount / total) * 1000) / 10 : 0;
+          return (
+            <Link
+              key={b.label}
+              href={AGING_LINKS[i]}
+              className={cn(
+                "group flex items-center gap-2 text-xs",
+                b.amount === 0 && "opacity-40"
+              )}
+            >
+              <span
+                className="h-2.5 w-2.5 rounded-sm"
+                style={{ backgroundColor: AGING_COLORS[i] }}
+              />
+              <span className="text-muted group-hover:text-fg">{b.label}</span>
+              <span className="font-mono text-faint">
+                {formatBRL(b.amount)} <span className="text-faint/70">({pct}%)</span>
+              </span>
+            </Link>
+          );
+        })}
       </div>
     </div>
   );

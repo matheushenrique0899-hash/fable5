@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
-import { computeAging, type AgingBucket } from "@/lib/services/charges";
+import { computeAging, computeOverdueHealth, type AgingBucket, type OverdueHealth } from "@/lib/services/charges";
 import type { Charge } from "@/lib/types";
 
 export interface FunnelStage {
@@ -24,6 +24,7 @@ export interface DashboardData {
   activeNegotiations: number;
   negotiationsOpenValue: number;
   aging: AgingBucket[];
+  overdueHealth: OverdueHealth;
   funnel: FunnelStage[];
   clientsTotal: number;
   recoveryTimeline: RecoveryMonth[]; // últimos 12 meses, mais recente primeiro
@@ -91,6 +92,7 @@ export async function getDashboardData(): Promise<DashboardData> {
 
   // Aging
   const aging = computeAging(open as Charge[]);
+  const overdueHealth = computeOverdueHealth(aging);
 
   // Funil de inadimplência (por CLIENTES, não cobranças)
   const withOpenIds = new Set(open.map((c) => c.client_id));
@@ -146,6 +148,7 @@ export async function getDashboardData(): Promise<DashboardData> {
     activeNegotiations: negotiations.length,
     negotiationsOpenValue,
     aging,
+    overdueHealth,
     funnel,
     clientsTotal,
     recoveryTimeline: buildRecoveryTimeline(paidYear, now),

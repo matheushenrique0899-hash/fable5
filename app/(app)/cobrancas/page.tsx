@@ -42,11 +42,12 @@ import { StatusBadge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { cn, daysOverdue, formatBRL, formatDate } from "@/lib/utils";
 
-type Filter = ChargeStatus | "todas";
+type Filter = ChargeStatus | "todas" | "pago_parcial";
 const FILTERS: { value: Filter; label: string }[] = [
   { value: "todas", label: "Todas" },
   { value: "pendente", label: "Pendentes" },
   { value: "atrasado", label: "Atrasadas" },
+  { value: "pago_parcial", label: "Pago parcial" },
   { value: "pago", label: "Pagas" },
 ];
 
@@ -118,8 +119,9 @@ export default function CobrancasPage() {
     setLoading(true);
     try {
       await refreshOverdue();
+      const dbFilter = filter === "pago_parcial" ? "todas" : filter;
       const [chargesData, negIds] = await Promise.all([
-        listCharges(filter),
+        listCharges(dbFilter),
         listActiveNegotiationClientIds(),
       ]);
       setCharges(chargesData);
@@ -148,6 +150,7 @@ return () => clearTimeout(t);
   }, [toast]);
 
   const visible = charges.filter((c) => {
+    if (filter === "pago_parcial" && !((c.paid_total ?? 0) > 0 && c.status !== "pago")) return false;
     if (agingFilter === "todas") return true;
     if (c.status === "pago") return false;
     const d = daysOverdue(c.due_date);

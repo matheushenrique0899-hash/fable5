@@ -80,7 +80,7 @@ export default function LoginPage() {
         router.push("/dashboard");
         router.refresh();
       } else {
-        setNotice("Conta criada. Confirme seu e-mail para entrar.");
+        setNotice("Conta criada e enviada para aprovação. Confirme seu e-mail; o acesso será liberado em breve.");
         setMode("login");
       }
     }

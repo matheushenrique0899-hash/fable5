@@ -222,7 +222,7 @@ export async function listCollectionPriorities(limit = 10) {
     .from("charges")
     .select("*, clients(name, document, phone)")
     .eq("status", "atrasado")
-    .order("due_date", { ascending: true })
+    .order("amount", { ascending: false })
     .limit(limit);
   if (error) throw error;
   return data ?? [];

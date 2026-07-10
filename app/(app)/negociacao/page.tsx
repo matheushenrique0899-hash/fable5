@@ -16,7 +16,7 @@ import {
   applyAgreementToCharges,
   listCollectionPriorities,
 } from "@/lib/services/negotiations";
-import { refreshOverdue, markAsPaid, ensureNegotiationForClient } from "@/lib/services/charges";
+import { refreshOverdue, ensureNegotiationForClient } from "@/lib/services/charges";
 import { listAllClientsLite } from "@/lib/services/clients";
 import type { Negotiation, NegotiationStatus, NegotiationContact, AgreementInstallment, NegotiationArgument, Charge } from "@/lib/types";
 import { NEGOTIATION_LABELS, ARGUMENT_LABELS } from "@/lib/types";
@@ -103,11 +103,6 @@ export default function NegociacaoPage() {
       setLoading(false);
     }
   }, []);
-
-  async function handlePriorityPay(id: string) {
-    await markAsPaid(id);
-    await load();
-  }
 
   async function handlePriorityNegotiation(c: Charge) {
     try {
@@ -337,9 +332,6 @@ export default function NegociacaoPage() {
                           onClick={() => handlePriorityNegotiation(c)}
                         >
                           <Handshake size={14} />
-                        </Button>
-                        <Button variant="secondary" size="sm" onClick={() => handlePriorityPay(c.id)}>
-                          <CheckCircle2 size={13} /> Receber
                         </Button>
                       </div>
                     </TD>

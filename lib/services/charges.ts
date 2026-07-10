@@ -225,6 +225,37 @@ export function computeAging(charges: Charge[]): AgingBucket[] {
   return buckets;
 }
 
+// Criticidade do over 90 — benchmark de mercado de cobrança/crédito:
+// até 5% da carteira = saudável; 5–15% = alerta; acima de 15% = crítico.
+export type OverdueCriticality = "saudavel" | "alerta" | "critico";
+
+export interface OverdueHealth {
+  over90Pct: number; // % da carteira em aberto que está acima de 90 dias
+  criticality: OverdueCriticality;
+  label: string;
+}
+
+export function computeOverdueHealth(aging: AgingBucket[]): OverdueHealth {
+  const total = aging.reduce((s, b) => s + b.amount, 0);
+  const over90 = aging[4]?.amount ?? 0;
+  const over90Pct = total > 0 ? (over90 / total) * 100 : 0;
+
+  let criticality: OverdueCriticality;
+  let label: string;
+  if (over90Pct <= 5) {
+    criticality = "saudavel";
+    label = "Saudável";
+  } else if (over90Pct <= 15) {
+    criticality = "alerta";
+    label = "Alerta";
+  } else {
+    criticality = "critico";
+    label = "Crítico";
+  }
+
+  return { over90Pct: Math.round(over90Pct * 10) / 10, criticality, label };
+}
+
 // Lista os pagamentos parciais de uma cobrança (histórico)
 export async function listPayments(chargeId: string) {
   const supabase = createClient();
