@@ -42,12 +42,11 @@ import { StatusBadge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { cn, daysOverdue, formatBRL, formatDate } from "@/lib/utils";
 
-type Filter = ChargeStatus | "todas" | "pago_parcial";
+type Filter = ChargeStatus | "todas";
 const FILTERS: { value: Filter; label: string }[] = [
   { value: "todas", label: "Todas" },
   { value: "pendente", label: "Pendentes" },
   { value: "atrasado", label: "Atrasadas" },
-  { value: "pago_parcial", label: "Pago parcial" },
   { value: "pago", label: "Pagas" },
 ];
 
@@ -119,9 +118,8 @@ export default function CobrancasPage() {
     setLoading(true);
     try {
       await refreshOverdue();
-      const dbFilter = filter === "pago_parcial" ? "todas" : filter;
       const [chargesData, negIds] = await Promise.all([
-        listCharges(dbFilter),
+        listCharges(filter),
         listActiveNegotiationClientIds(),
       ]);
       setCharges(chargesData);
@@ -150,17 +148,12 @@ return () => clearTimeout(t);
   }, [toast]);
 
   const visible = charges.filter((c) => {
-    if (filter === "pago_parcial" && !((c.paid_total ?? 0) > 0 && c.status !== "pago")) return false;
     if (agingFilter === "todas") return true;
     if (c.status === "pago") return false;
     const d = daysOverdue(c.due_date);
     const band = AGING.find((a) => a.value === agingFilter)!;
     return d >= band.min && d <= band.max;
   });
-
-  const openCharges = visible.filter((c) => c.status !== "pago");
-  const openTotal = openCharges.reduce((s, c) => s + Number(c.amount), 0);
-  const openPaidPartial = openCharges.reduce((s, c) => s + (c.paid_total ?? 0), 0);
 
   // Busca por nome do cliente (parcial, case-insensitive)
   const searched = search.trim()
@@ -418,13 +411,6 @@ return () => clearTimeout(t);
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Cobranças</h1>
-          <p className="mt-1 text-sm text-muted">
-            {formatBRL(openTotal)} em aberto
-            {openPaidPartial > 0 && (
-              <span className="text-accent"> · {formatBRL(openPaidPartial)} já recebido (parcial)</span>
-            )}
-            {(filter !== "todas" || agingFilter !== "todas") && " (filtro aplicado)"}
-          </p>
         </div>
         <div className="flex gap-2">
           <Button variant="secondary" onClick={exportCSV} disabled={visible.length === 0}>
