@@ -3,24 +3,20 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
-  Receipt,
   TrendingUp,
   Users,
   Handshake,
   AlertTriangle,
-  ArrowRight,
-  CheckCircle2,
-  MessageCircle,
   Percent,
 } from "lucide-react";
 import { getDashboardData, type DashboardData } from "@/lib/services/dashboard";
-import { markAsPaid } from "@/lib/services/charges";
 import { StatCard } from "@/components/stat-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select } from "@/components/ui/select";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
-import { cn, daysOverdue, formatBRL, formatDate } from "@/lib/utils";
+import { cn, formatBRL } from "@/lib/utils";
 
 // Cores dos segmentos do aging: verde → amarelo → laranja → vermelho
 const AGING_COLORS = ["#3ECF8E", "#F5B94E", "#E8853D", "#F0645C", "#C0392B"];
@@ -32,20 +28,22 @@ const AGING_LINKS = [
   "/cobrancas?aging=d90p",
 ];
 
+const PERIOD_OPTIONS = [
+  { value: 3, label: "Últimos 3 meses" },
+  { value: 6, label: "Últimos 6 meses" },
+  { value: 12, label: "Últimos 12 meses" },
+];
+
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [timelineMonths, setTimelineMonths] = useState(6);
 
   const load = useCallback(() => {
     getDashboardData().then(setData).catch((e) => setError(e.message));
   }, []);
 
   useEffect(() => { load(); }, [load]);
-
-  async function handleQuickPay(id: string) {
-    await markAsPaid(id);
-    load();
-  }
 
   const now = new Date();
   const periodLabel = now
@@ -182,95 +180,62 @@ export default function DashboardPage() {
               )}
             </Card>
 
-            {/* Prioridades de cobrança */}
+            {/* Linha do tempo de recuperação */}
             <Card className="lg:col-span-3">
               <CardHeader>
-                <CardTitle>Prioridades de cobrança</CardTitle>
-                <Link
-                  href="/cobrancas?status=atrasado"
-                  className="flex items-center gap-1 text-xs font-medium text-accent hover:underline"
+                <CardTitle>Linha do tempo de recuperação</CardTitle>
+                <Select
+                  value={timelineMonths}
+                  onChange={(e) => setTimelineMonths(Number(e.target.value))}
+                  className="h-8 w-auto text-xs"
                 >
-                  Ver todas <ArrowRight size={12} />
-                </Link>
+                  {PERIOD_OPTIONS.map((p) => (
+                    <option key={p.value} value={p.value}>{p.label}</option>
+                  ))}
+                </Select>
               </CardHeader>
-              {data.priorities.length === 0 ? (
+              {data.recoveryTimeline.every((m) => m.amount === 0) ? (
                 <EmptyState
-                  icon={<Receipt size={18} />}
-                  title="Nada em atraso"
-                  description="Nenhuma cobrança vencida na carteira. Bom trabalho."
+                  icon={<TrendingUp size={18} />}
+                  title="Nenhum recebimento"
+                  description="Nenhum pagamento registrado no período selecionado."
+                  action={
+                    <Link href="/cobrancas">
+                      <Button size="sm">Registrar cobrança</Button>
+                    </Link>
+                  }
                 />
               ) : (
-                <Table>
-                  <THead>
-                    <TR>
-                      <TH>Cliente</TH>
-                      <TH className="text-right">Valor</TH>
-                      <TH>Atraso</TH>
-                      <TH className="text-right">Ações</TH>
-                    </TR>
-                  </THead>
-                  <TBody>
-                    {data.priorities.map((c) => {
-                      const days = daysOverdue(c.due_date);
-                      const phone = c.clients?.phone ?? null;
-                      const waText = encodeURIComponent(
-                        `Olá ${c.clients?.name ?? ""}! Consta em aberto o valor de ${formatBRL(
-                          Number(c.amount)
-                        )} com vencimento em ${formatDate(c.due_date)}. Podemos conversar sobre a regularização?`
-                      );
-                      return (
-                        <TR key={c.id}>
-                          <TD className="font-medium">{c.clients?.name ?? "—"}</TD>
-                          <TD className="text-right font-mono">{formatBRL(Number(c.amount))}</TD>
-                          <TD>
-                            <span className="inline-flex items-center gap-1.5 rounded-full border border-danger/25 bg-danger-soft px-2.5 py-0.5 text-xs font-medium text-danger">
-                              <span className="h-1.5 w-1.5 rounded-full bg-current" />
-                              Atrasado há {days}d
-                            </span>
-                          </TD>
-                          <TD>
-                            <div className="flex justify-end gap-1">
-                              {phone ? (
-                                <a
-                                  href={`https://wa.me/55${phone}?text=${waText}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                >
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    aria-label="Cobrar no WhatsApp"
-                                    title="Cobrar no WhatsApp"
-                                    className="hover:bg-accent-soft hover:text-accent"
-                                  >
-                                    <MessageCircle size={14} />
-                                  </Button>
-                                </a>
-                              ) : (
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  disabled
-                                  aria-label="Sem telefone cadastrado"
-                                  title="Cliente sem telefone cadastrado"
-                                >
-                                  <MessageCircle size={14} />
-                                </Button>
-                              )}
-                              <Button
-                                variant="secondary"
-                                size="sm"
-                                onClick={() => handleQuickPay(c.id)}
-                              >
-                                <CheckCircle2 size={13} /> Receber
-                              </Button>
-                            </div>
-                          </TD>
-                        </TR>
-                      );
-                    })}
-                  </TBody>
-                </Table>
+                <CardContent className="space-y-3">
+                  {data.recoveryTimeline.slice(0, timelineMonths).map((m) => {
+                    const maxAmount = Math.max(
+                      ...data.recoveryTimeline.slice(0, timelineMonths).map((x) => x.amount),
+                      1
+                    );
+                    const pct = Math.round((m.amount / maxAmount) * 100);
+                    return (
+                      <div key={m.label}>
+                        <div className="mb-1 flex items-baseline justify-between text-xs">
+                          <span className="font-medium text-fg">{m.label}</span>
+                          <span className="font-mono text-muted">
+                            {formatBRL(m.amount)}
+                            {m.count > 0 && (
+                              <span className="ml-1.5 text-faint">
+                                ({m.count} {m.count === 1 ? "cobrança" : "cobranças"})
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                        <div className="h-2.5 overflow-hidden rounded-full bg-raised">
+                          <div
+                            className="h-full rounded-full bg-accent transition-all"
+                            style={{ width: `${Math.max(pct, m.amount > 0 ? 2 : 0)}%` }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </CardContent>
               )}
             </Card>
           </div>

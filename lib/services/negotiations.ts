@@ -213,3 +213,17 @@ export async function applyAgreementToCharges(
     .eq("client_id", clientId)
     .neq("status", "pago");
 }
+
+// Prioridades de cobrança: cobranças atrasadas ordenadas pelo maior tempo de atraso.
+// Usada na aba Negociação para o operador saber por onde começar.
+export async function listCollectionPriorities(limit = 10) {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("charges")
+    .select("*, clients(name, document, phone)")
+    .eq("status", "atrasado")
+    .order("due_date", { ascending: true })
+    .limit(limit);
+  if (error) throw error;
+  return data ?? [];
+}

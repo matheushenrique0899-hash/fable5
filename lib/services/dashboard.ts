@@ -10,6 +10,12 @@ export interface FunnelStage {
   color: string;
 }
 
+export interface RecoveryMonth {
+  label: string;   // "Ago/2026"
+  amount: number;
+  count: number;
+}
+
 export interface DashboardData {
   overdueAmount: number;
   overdueCount: number;
@@ -20,7 +26,7 @@ export interface DashboardData {
   aging: AgingBucket[];
   funnel: FunnelStage[];
   clientsTotal: number;
-  priorities: Charge[];
+  recoveryTimeline: RecoveryMonth[]; // últimos 12 meses, mais recente primeiro
 }
 
 export async function getDashboardData(): Promise<DashboardData> {
@@ -34,8 +40,9 @@ export async function getDashboardData(): Promise<DashboardData> {
   const nextMonthDate = new Date(now.getFullYear(), now.getMonth() + 1, 1)
     .toISOString()
     .slice(0, 10);
+  const twelveMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 11, 1).toISOString();
 
-  const [clientsRes, openRes, paidMonthRes, negRes, prioritiesRes] = await Promise.all([
+  const [clientsRes, openRes, paidMonthRes, negRes, paidYearRes] = await Promise.all([
     supabase.from("clients").select("id", { count: "exact", head: true }),
     supabase
       .from("charges")
@@ -52,16 +59,16 @@ export async function getDashboardData(): Promise<DashboardData> {
       .in("status", ["em_negociacao", "aguardando_retorno"]),
     supabase
       .from("charges")
-      .select("*, clients(name, document, phone)")
-      .eq("status", "atrasado")
-      .order("due_date", { ascending: true })
-      .limit(5),
+      .select("amount, paid_at")
+      .eq("status", "pago")
+      .gte("paid_at", twelveMonthsAgo),
   ]);
 
   const clientsTotal = clientsRes.count ?? 0;
   const open = openRes.data ?? [];
   const paidMonth = paidMonthRes.data ?? [];
   const negotiations = negRes.data ?? [];
+  const paidYear = paidYearRes.data ?? [];
 
   // Em atraso
   const overdue = open.filter((c) => c.status === "atrasado");
@@ -141,6 +148,34 @@ export async function getDashboardData(): Promise<DashboardData> {
     aging,
     funnel,
     clientsTotal,
-    priorities: (prioritiesRes.data ?? []) as Charge[],
+    recoveryTimeline: buildRecoveryTimeline(paidYear, now),
   };
+}
+
+// Monta a lista dos últimos 12 meses (mais recente primeiro) com o valor
+// e a quantidade de cobranças recuperadas em cada um.
+function buildRecoveryTimeline(
+  paidYear: { amount: number; paid_at: string | null }[],
+  now: Date
+): RecoveryMonth[] {
+  const months: RecoveryMonth[] = [];
+  for (let i = 0; i < 12; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const label = d
+      .toLocaleDateString("pt-BR", { month: "short", year: "numeric" })
+      .replace(".", "")
+      .replace(/^(\w)/, (m) => m.toUpperCase())
+      .replace(" de ", "/");
+    const inMonth = paidYear.filter((c) => {
+      if (!c.paid_at) return false;
+      const p = new Date(c.paid_at);
+      return p.getFullYear() === d.getFullYear() && p.getMonth() === d.getMonth();
+    });
+    months.push({
+      label,
+      amount: inMonth.reduce((s, c) => s + Number(c.amount), 0),
+      count: inMonth.length,
+    });
+  }
+  return months;
 }
