@@ -576,16 +576,6 @@ return () => clearTimeout(t);
                             </span>
                           )}
                         </span>
-                        {negotiatingIds.has(c.client_id) && (
-                          <Link
-                            href="/negociacao"
-                            title="Em negociação — ver na aba Negociação"
-                            className="inline-flex items-center gap-1 rounded-full border border-warn/25 bg-warn-soft px-2 py-0.5 text-[10px] font-medium text-warn transition-colors hover:border-warn/50"
-                          >
-                            <Handshake size={11} />
-                            Em negociação
-                          </Link>
-                        )}
                       </span>
                     </TD>
                     <TD className="font-mono">
@@ -624,7 +614,7 @@ return () => clearTimeout(t);
                         <span className="text-faint">—</span>
                       )}
                     </TD>
-                    <TD><StatusBadge status={c.status} /></TD>
+                    <TD><StatusBadge status={c.status} hasPaidPartial={(c.paid_total ?? 0) > 0} /></TD>
                     <TD>
                       <div className="flex justify-end gap-1 whitespace-nowrap">
                         {c.status !== "pago" && (
@@ -1134,6 +1124,17 @@ return () => clearTimeout(t);
                   {formatBRL(payHistory.reduce((s, p) => s + Number(p.amount), 0))}
                 </span>
               </p>
+              {paying && (() => {
+                const remaining = Number(paying.amount) - payHistory.reduce((s, p) => s + Number(p.amount), 0);
+                return remaining > 0.009 ? (
+                  <p className="border-t border-border px-3 py-2 text-right text-xs">
+                    <span className="text-faint">Falta receber: </span>
+                    <span className="font-mono font-semibold text-warn">
+                      {formatBRL(remaining)}
+                    </span>
+                  </p>
+                ) : null;
+              })()}
             </div>
           )}
 

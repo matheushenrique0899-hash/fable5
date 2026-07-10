@@ -236,24 +236,6 @@ export default function NegociacaoPage() {
         </div>
       </header>
 
-      {/* KPIs: argumentos dos devedores (motivos de não pagamento) */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        {(Object.keys(ARGUMENT_LABELS) as NegotiationArgument[]).map((key) => {
-          const count = all.filter((n) => n.argument === key).length;
-          return (
-            <Card key={key} className="p-4">
-              <p className="text-[11px] font-medium uppercase tracking-wide text-faint">
-                {ARGUMENT_LABELS[key]}
-              </p>
-              <p className="mt-1.5 font-mono text-lg font-semibold text-fg">{count}</p>
-              <p className="text-xs text-muted">
-                {count === 1 ? "cliente" : "clientes"}
-              </p>
-            </Card>
-          );
-        })}
-      </div>
-
       {/* Distribuição por status */}
       <Card>
         <CardHeader>
