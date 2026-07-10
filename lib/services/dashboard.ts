@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
+import { fetchAllRows } from "@/lib/services/fetch-all";
 import { computeAging, computeOverdueHealth, type AgingBucket, type OverdueHealth } from "@/lib/services/charges";
 import type { Charge } from "@/lib/types";
 
@@ -43,33 +44,42 @@ export async function getDashboardData(): Promise<DashboardData> {
     .slice(0, 10);
   const twelveMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 11, 1).toISOString();
 
-  const [clientsRes, openRes, paidMonthRes, negRes, paidYearRes] = await Promise.all([
+  const [clientsRes, open, paidMonth, negotiations, paidYear] = await Promise.all([
     supabase.from("clients").select("id", { count: "exact", head: true }),
-    supabase
-      .from("charges")
-      .select("amount, status, due_date, client_id")
-      .in("status", ["pendente", "atrasado"]),
-    supabase
-      .from("charges")
-      .select("amount, paid_at, client_id")
-      .eq("status", "pago")
-      .gte("paid_at", monthStartISO),
-    supabase
-      .from("negotiations")
-      .select("client_id")
-      .in("status", ["em_negociacao", "aguardando_retorno"]),
-    supabase
-      .from("charges")
-      .select("amount, paid_at")
-      .eq("status", "pago")
-      .gte("paid_at", twelveMonthsAgo),
+    fetchAllRows<{ amount: number; status: string; due_date: string; client_id: string }>(
+      (from, to) =>
+        supabase
+          .from("charges")
+          .select("amount, status, due_date, client_id")
+          .in("status", ["pendente", "atrasado"])
+          .range(from, to)
+    ),
+    fetchAllRows<{ amount: number; paid_at: string | null; client_id: string }>((from, to) =>
+      supabase
+        .from("charges")
+        .select("amount, paid_at, client_id")
+        .eq("status", "pago")
+        .gte("paid_at", monthStartISO)
+        .range(from, to)
+    ),
+    fetchAllRows<{ client_id: string }>((from, to) =>
+      supabase
+        .from("negotiations")
+        .select("client_id")
+        .in("status", ["em_negociacao", "aguardando_retorno"])
+        .range(from, to)
+    ),
+    fetchAllRows<{ amount: number; paid_at: string | null }>((from, to) =>
+      supabase
+        .from("charges")
+        .select("amount, paid_at")
+        .eq("status", "pago")
+        .gte("paid_at", twelveMonthsAgo)
+        .range(from, to)
+    ),
   ]);
 
   const clientsTotal = clientsRes.count ?? 0;
-  const open = openRes.data ?? [];
-  const paidMonth = paidMonthRes.data ?? [];
-  const negotiations = negRes.data ?? [];
-  const paidYear = paidYearRes.data ?? [];
 
   // Em atraso
   const overdue = open.filter((c) => c.status === "atrasado");

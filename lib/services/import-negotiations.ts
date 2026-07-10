@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
+import { fetchAllRows } from "@/lib/services/fetch-all";
 import type { ImportBatch } from "@/lib/types";
 
 export interface ImportNegRow {
@@ -129,11 +130,15 @@ export async function checkDuplicates(rows: ImportNegRow[]): Promise<ImportNegRo
   if (!user) return rows;
 
   // Busca cobranças importadas com os campos que compõem a chave
-  const { data: existing } = await supabase
-    .from("charges")
-    .select("amount, due_date, sale_date, clients(name)")
-    .eq("owner_id", user.id)
-    .like("description", "Saldo devedor importado%");
+  const existing = await fetchAllRows<{ amount: number; due_date: string; sale_date: string | null; clients: { name: string }[] | { name: string } | null }>(
+    (from, to) =>
+      supabase
+        .from("charges")
+        .select("amount, due_date, sale_date, clients(name)")
+        .eq("owner_id", user.id)
+        .like("description", "Saldo devedor importado%")
+        .range(from, to)
+  );
 
   // Chave normalizada: nome|valor|venda|vencimento
   const keyOf = (name: string, amount: number, sale: string | null, due: string) =>
@@ -141,7 +146,12 @@ export async function checkDuplicates(rows: ImportNegRow[]): Promise<ImportNegRo
 
   const existingKeys = new Set(
     (existing ?? []).map((c: any) =>
-      keyOf(c.clients?.name ?? "", Number(c.amount), c.sale_date, c.due_date)
+      keyOf(
+        Array.isArray(c.clients) ? c.clients[0]?.name ?? "" : c.clients?.name ?? "",
+        Number(c.amount),
+        c.sale_date,
+        c.due_date
+      )
     )
   );
 

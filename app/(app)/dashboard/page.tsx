@@ -20,14 +20,6 @@ import { cn, formatBRL } from "@/lib/utils";
 
 // Cores dos segmentos do aging: verde → amarelo → laranja → vermelho
 const AGING_COLORS = ["#3ECF8E", "#F5B94E", "#E8853D", "#F0645C", "#C0392B"];
-const AGING_LINKS = [
-  "/cobrancas",
-  "/cobrancas?aging=d30",
-  "/cobrancas?aging=d60",
-  "/cobrancas?aging=d90",
-  "/cobrancas?aging=d90p",
-];
-
 const PERIOD_OPTIONS = [
   { value: 3, label: "Últimos 3 meses" },
   { value: 6, label: "Últimos 6 meses" },
@@ -103,7 +95,6 @@ export default function DashboardPage() {
                   ? "warn"
                   : data.overdueAmount > 0 ? "danger" : "default"
               }
-              href="/cobrancas?status=atrasado"
             />
             <StatCard
               label="Recebido no mês"
@@ -111,7 +102,6 @@ export default function DashboardPage() {
               hint="Cobranças pagas"
               icon={<TrendingUp size={15} />}
               tone="accent"
-              href="/cobrancas?status=pago"
             />
             <StatCard
               label="Recuperação no mês"
@@ -131,7 +121,6 @@ export default function DashboardPage() {
                   ? "warn"
                   : "danger"
               }
-              href="/cobrancas"
             />
             <StatCard
               label="Em negociação"
@@ -190,27 +179,36 @@ export default function DashboardPage() {
                 />
               ) : (
                 <CardContent className="space-y-3">
-                  {data.funnel.map((stage) => (
-                    <Link key={stage.label} href={stage.href} className="group block">
-                      <div className="mb-1 flex items-baseline justify-between text-xs">
-                        <span className="text-muted transition-colors group-hover:text-fg">
-                          {stage.label}
-                        </span>
-                        <span className="font-mono text-faint">
-                          {stage.count} · {stage.pct}%
-                        </span>
-                      </div>
-                      <div className="h-5 overflow-hidden rounded bg-raised">
-                        <div
-                          className="h-full rounded transition-all group-hover:opacity-80"
-                          style={{
-                            width: `${Math.max(stage.pct, stage.count > 0 ? 3 : 0)}%`,
-                            backgroundColor: stage.color,
-                          }}
-                        />
-                      </div>
-                    </Link>
-                  ))}
+                  {data.funnel.map((stage) => {
+                    const clickable = !stage.href.startsWith("/cobrancas");
+                    const Wrapper = clickable ? Link : "div";
+                    const wrapperProps = clickable ? { href: stage.href } : {};
+                    return (
+                      <Wrapper
+                        key={stage.label}
+                        {...(wrapperProps as any)}
+                        className={cn("block", clickable && "group")}
+                      >
+                        <div className="mb-1 flex items-baseline justify-between text-xs">
+                          <span className={cn("text-muted", clickable && "transition-colors group-hover:text-fg")}>
+                            {stage.label}
+                          </span>
+                          <span className="font-mono text-faint">
+                            {stage.count} · {stage.pct}%
+                          </span>
+                        </div>
+                        <div className="h-5 overflow-hidden rounded bg-raised">
+                          <div
+                            className={cn("h-full rounded transition-all", clickable && "group-hover:opacity-80")}
+                            style={{
+                              width: `${Math.max(stage.pct, stage.count > 0 ? 3 : 0)}%`,
+                              backgroundColor: stage.color,
+                            }}
+                          />
+                        </div>
+                      </Wrapper>
+                    );
+                  })}
                 </CardContent>
               )}
             </Card>
@@ -298,11 +296,10 @@ function AgingBar({ aging }: { aging: { label: string; amount: number; count: nu
           const pct = (b.amount / total) * 100;
           if (pct === 0) return null;
           return (
-            <Link
+            <div
               key={b.label}
-              href={AGING_LINKS[i]}
               title={`${b.label}: ${formatBRL(b.amount)} (${b.count})`}
-              className="h-full transition-opacity hover:opacity-80"
+              className="h-full"
               style={{ width: `${pct}%`, backgroundColor: AGING_COLORS[i] }}
             />
           );
@@ -312,11 +309,10 @@ function AgingBar({ aging }: { aging: { label: string; amount: number; count: nu
         {aging.map((b, i) => {
           const pct = total > 0 ? Math.round((b.amount / total) * 1000) / 10 : 0;
           return (
-            <Link
+            <div
               key={b.label}
-              href={AGING_LINKS[i]}
               className={cn(
-                "group flex items-center gap-2 text-xs",
+                "flex items-center gap-2 text-xs",
                 b.amount === 0 && "opacity-40"
               )}
             >
@@ -324,11 +320,11 @@ function AgingBar({ aging }: { aging: { label: string; amount: number; count: nu
                 className="h-2.5 w-2.5 rounded-sm"
                 style={{ backgroundColor: AGING_COLORS[i] }}
               />
-              <span className="text-muted group-hover:text-fg">{b.label}</span>
+              <span className="text-muted">{b.label}</span>
               <span className="font-mono text-faint">
                 {formatBRL(b.amount)} <span className="text-faint/70">({pct}%)</span>
               </span>
-            </Link>
+            </div>
           );
         })}
       </div>

@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/client";
 import type { Client } from "@/lib/types";
 import { onlyDigits } from "@/lib/utils";
+import { fetchAllRows } from "@/lib/services/fetch-all";
 
 const PAGE_SIZE = 10;
 
@@ -27,12 +28,13 @@ export async function listClients(opts: { search?: string; page?: number }) {
 
 export async function listAllClientsLite() {
   const supabase = createClient();
-  const { data, error } = await supabase
-    .from("clients")
-    .select("id, name, document")
-    .order("name");
-  if (error) throw error;
-  return data ?? [];
+  return fetchAllRows<{ id: string; name: string; document: string }>((from, to) =>
+    supabase
+      .from("clients")
+      .select("id, name, document")
+      .order("name")
+      .range(from, to)
+  );
 }
 
 export async function createClientRecord(input: {

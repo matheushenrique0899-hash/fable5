@@ -1,16 +1,18 @@
 import { createClient } from "@/lib/supabase/client";
+import { fetchAllRows } from "@/lib/services/fetch-all";
 import type { Negotiation, NegotiationStatus, NegotiationContact, NegotiationArgument } from "@/lib/types";
 
 export async function listNegotiations(status?: NegotiationStatus | "todas") {
   const supabase = createClient();
-  let query = supabase
-    .from("negotiations")
-    .select("*, clients(name, document)")
-    .order("updated_at", { ascending: false });
-  if (status && status !== "todas") query = query.eq("status", status);
-  const { data, error } = await query;
-  if (error) throw error;
-  return (data ?? []) as Negotiation[];
+  return fetchAllRows<Negotiation>((from, to) => {
+    let query = supabase
+      .from("negotiations")
+      .select("*, clients(name, document)")
+      .order("updated_at", { ascending: false })
+      .range(from, to);
+    if (status && status !== "todas") query = query.eq("status", status);
+    return query;
+  });
 }
 
 export interface NegotiationInput {

@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
+import { fetchAllRows } from "@/lib/services/fetch-all";
 import type { Charge, ChargeStatus } from "@/lib/types";
 
 export async function refreshOverdue() {
@@ -8,25 +9,32 @@ export async function refreshOverdue() {
 
 export async function listCharges(status?: ChargeStatus | "todas") {
   const supabase = createClient();
-  let query = supabase
-    .from("charges")
-    .select("*, clients(name, document, phone)")
-    .order("due_date", { ascending: true });
-  if (status && status !== "todas") query = query.eq("status", status);
-  const { data, error } = await query;
-  if (error) throw error;
-  const charges = (data ?? []) as Charge[];
+
+  const charges = await fetchAllRows<Charge>((from, to) => {
+    let query = supabase
+      .from("charges")
+      .select("*, clients(name, document, phone)")
+      .order("due_date", { ascending: true })
+      .range(from, to);
+    if (status && status !== "todas") query = query.eq("status", status);
+    return query;
+  });
 
   // Anexa a soma dos pagamentos parciais de cada cobrança
+  // (busca em blocos de 200 ids para não estourar o tamanho da URL)
   if (charges.length > 0) {
-    const { data: payments } = await supabase
-      .from("charge_payments")
-      .select("charge_id, amount")
-      .in("charge_id", charges.map((c) => c.id));
     const paidMap = new Map<string, number>();
-    (payments ?? []).forEach((p) => {
-      paidMap.set(p.charge_id, (paidMap.get(p.charge_id) ?? 0) + Number(p.amount));
-    });
+    const ids = charges.map((c) => c.id);
+    for (let i = 0; i < ids.length; i += 200) {
+      const chunk = ids.slice(i, i + 200);
+      const { data: payments } = await supabase
+        .from("charge_payments")
+        .select("charge_id, amount")
+        .in("charge_id", chunk);
+      (payments ?? []).forEach((p) => {
+        paidMap.set(p.charge_id, (paidMap.get(p.charge_id) ?? 0) + Number(p.amount));
+      });
+    }
     charges.forEach((c) => { c.paid_total = paidMap.get(c.id) ?? 0; });
   }
   return charges;
