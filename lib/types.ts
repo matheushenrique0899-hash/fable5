@@ -70,6 +70,7 @@ export interface Negotiation {
   first_contact: string | null;
   last_contact: string | null;
   notes: string | null;
+  argument: NegotiationArgument | null;
   agreed_amount: number | null;
   agreed_installments: number | null;
   agreed_due: string | null;
@@ -84,6 +85,23 @@ export const NEGOTIATION_LABELS: Record<NegotiationStatus, string> = {
   aceitou: "Aceitou",
   recusou: "Recusou",
   nao_localizado: "Não localizado",
+};
+
+export type NegotiationArgument =
+  | "sem_condicoes"
+  | "esqueceu"
+  | "contesta_divida"
+  | "insatisfeito"
+  | "promessa_pagamento"
+  | "nao_responde";
+
+export const ARGUMENT_LABELS: Record<NegotiationArgument, string> = {
+  sem_condicoes: "Sem condições no momento",
+  esqueceu: "Esqueceu / desorganização",
+  contesta_divida: "Contesta a dívida",
+  insatisfeito: "Insatisfeito com produto/serviço",
+  promessa_pagamento: "Promessa de pagamento",
+  nao_responde: "Não responde / sumiu",
 };
 
 export interface AgreementInstallment {

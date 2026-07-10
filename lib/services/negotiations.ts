@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
-import type { Negotiation, NegotiationStatus, NegotiationContact } from "@/lib/types";
+import type { Negotiation, NegotiationStatus, NegotiationContact, NegotiationArgument } from "@/lib/types";
 
 export async function listNegotiations(status?: NegotiationStatus | "todas") {
   const supabase = createClient();
@@ -20,6 +20,7 @@ export interface NegotiationInput {
   first_contact?: string;
   last_contact?: string;
   notes?: string;
+  argument?: NegotiationArgument | null;
   agreed_amount?: number | null;
   agreed_installments?: number | null;
   agreed_due?: string | null;
@@ -49,6 +50,7 @@ export async function updateNegotiation(id: string, input: Partial<NegotiationIn
     first_contact: input.first_contact || null,
     last_contact: input.last_contact || null,
     notes: input.notes?.trim() || null,
+    argument: input.argument ?? null,
     agreed_amount: input.agreed_amount ?? null,
     agreed_installments: input.agreed_installments ?? null,
     agreed_due: input.agreed_due || null,
@@ -187,4 +189,27 @@ export async function unpayInstallment(id: string): Promise<void> {
     .update({ paid_at: null })
     .eq("id", id);
   if (error) throw error;
+}
+
+// Registra o acordo como observação nas cobranças em aberto do cliente
+export async function applyAgreementToCharges(
+  clientId: string,
+  agreedAmount: number,
+  installments: number,
+  firstDue: string
+): Promise<void> {
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return;
+
+  const dueBR = firstDue.split("-").reverse().join("/");
+  const note = `Acordo: ${installments}x de R$ ${(agreedAmount / installments).toFixed(2).replace(".", ",")} (total R$ ${agreedAmount.toFixed(2).replace(".", ",")}), 1º venc. ${dueBR}`;
+
+  // Aplica nas cobranças não pagas do cliente
+  await supabase
+    .from("charges")
+    .update({ observation: note })
+    .eq("owner_id", user.id)
+    .eq("client_id", clientId)
+    .neq("status", "pago");
 }

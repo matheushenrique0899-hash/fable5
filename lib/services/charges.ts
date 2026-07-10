@@ -224,3 +224,32 @@ export function computeAging(charges: Charge[]): AgingBucket[] {
   }
   return buckets;
 }
+
+// Lista os pagamentos parciais de uma cobrança (histórico)
+export async function listPayments(chargeId: string) {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("charge_payments")
+    .select("*")
+    .eq("charge_id", chargeId)
+    .order("paid_date", { ascending: false });
+  if (error) throw error;
+  return data ?? [];
+}
+
+// Remove um pagamento parcial (caso tenha registrado errado)
+export async function deletePayment(paymentId: string, chargeId: string) {
+  const supabase = createClient();
+  const { error } = await supabase.from("charge_payments").delete().eq("id", paymentId);
+  if (error) throw error;
+
+  // Se a cobrança estava paga e agora tem saldo, reabre
+  const { data: charge } = await supabase.from("charges").select("amount, status").eq("id", chargeId).single();
+  const { data: remaining } = await supabase.from("charge_payments").select("amount").eq("charge_id", chargeId);
+  const paid = (remaining ?? []).reduce((s, p) => s + Number(p.amount), 0);
+  if (charge && charge.status === "pago" && paid < Number(charge.amount) - 0.009) {
+    const isOverdue = false; // será recalculado pelo refresh_overdue
+    await supabase.from("charges").update({ status: "pendente", paid_at: null }).eq("id", chargeId);
+    await supabase.rpc("refresh_overdue_charges");
+  }
+}

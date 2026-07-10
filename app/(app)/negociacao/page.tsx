@@ -12,11 +12,12 @@ import {
   generateInstallments,
   payInstallment,
   unpayInstallment,
+  applyAgreementToCharges,
 } from "@/lib/services/negotiations";
-import { listCharges, computeAging, refreshOverdue } from "@/lib/services/charges";
+import { refreshOverdue } from "@/lib/services/charges";
 import { listAllClientsLite } from "@/lib/services/clients";
-import type { Negotiation, NegotiationStatus, NegotiationContact, AgreementInstallment } from "@/lib/types";
-import { NEGOTIATION_LABELS } from "@/lib/types";
+import type { Negotiation, NegotiationStatus, NegotiationContact, AgreementInstallment, NegotiationArgument } from "@/lib/types";
+import { NEGOTIATION_LABELS, ARGUMENT_LABELS } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,7 +28,6 @@ import { Dialog } from "@/components/ui/dialog";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { cn, formatBRL, formatDate } from "@/lib/utils";
-import type { AgingBucket } from "@/lib/services/charges";
 
 type Filter = NegotiationStatus | "todas";
 
@@ -54,6 +54,7 @@ const emptyForm = {
   first_contact: "",
   last_contact: "",
   notes: "",
+  argument: "" as "" | NegotiationArgument,
   agreed_amount: "",
   agreed_installments: "",
   agreed_due: "",
@@ -62,7 +63,6 @@ const emptyForm = {
 export default function NegociacaoPage() {
   const [all, setAll] = useState<Negotiation[]>([]);
   const [clients, setClients] = useState<{ id: string; name: string }[]>([]);
-  const [aging, setAging] = useState<AgingBucket[]>([]);
   const [filter, setFilter] = useState<Filter>("todas");
   const [loading, setLoading] = useState(true);
 
@@ -89,12 +89,8 @@ export default function NegociacaoPage() {
     setLoading(true);
     try {
       await refreshOverdue();
-      const [negotiations, charges] = await Promise.all([
-        listNegotiations("todas"),
-        listCharges("todas"),
-      ]);
+      const negotiations = await listNegotiations("todas");
       setAll(negotiations);
-      setAging(computeAging(charges));
     } finally {
       setLoading(false);
     }
@@ -123,6 +119,7 @@ export default function NegociacaoPage() {
       first_contact: n.first_contact ?? "",
       last_contact: n.last_contact ?? "",
       notes: n.notes ?? "",
+      argument: n.argument ?? "",
       agreed_amount: n.agreed_amount ? String(n.agreed_amount).replace(".", ",") : "",
       agreed_installments: n.agreed_installments ? String(n.agreed_installments) : "",
       agreed_due: n.agreed_due ?? "",
@@ -144,31 +141,27 @@ export default function NegociacaoPage() {
     setSaving(true);
     try {
       const agreed = form.status === "aceitou";
+      const agreedAmount = agreed && form.agreed_amount
+        ? Number(form.agreed_amount.replace(/\./g, "").replace(",", "."))
+        : null;
+      const agreedInst = agreed && form.agreed_installments
+        ? Math.max(parseInt(form.agreed_installments) || 1, 1)
+        : null;
+      const agreedDue = agreed ? form.agreed_due || null : null;
+
       const payload = {
         ...form,
-        agreed_amount: agreed && form.agreed_amount
-          ? Number(form.agreed_amount.replace(/\./g, "").replace(",", "."))
-          : null,
-        agreed_installments: agreed && form.agreed_installments
-          ? Math.max(parseInt(form.agreed_installments) || 1, 1)
-          : null,
-        agreed_due: agreed ? form.agreed_due || null : null,
+        argument: form.argument || null,
+        agreed_amount: agreedAmount,
+        agreed_installments: agreedInst,
+        agreed_due: agreedDue,
       };
       if (editing) {
         await updateNegotiation(editing.id, payload);
-        // Gera (ou regenera) as parcelas do acordo quando status = aceitou
-        if (
-          payload.status === "aceitou" &&
-          payload.agreed_amount &&
-          payload.agreed_installments &&
-          payload.agreed_due
-        ) {
-          await generateInstallments(
-            editing.id,
-            payload.agreed_amount,
-            payload.agreed_installments,
-            payload.agreed_due
-          );
+        if (payload.status === "aceitou" && agreedAmount && agreedInst && agreedDue) {
+          await generateInstallments(editing.id, agreedAmount, agreedInst, agreedDue);
+          // Reflete o acordo como observação nas cobranças do cliente
+          await applyAgreementToCharges(editing.client_id, agreedAmount, agreedInst, agreedDue);
         }
       }
       setDialogOpen(false);
@@ -243,26 +236,22 @@ export default function NegociacaoPage() {
         </div>
       </header>
 
-      {/* KPIs: faixas de atraso da carteira em aberto */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-        {aging.map((b, i) => (
-          <Card key={b.label} className="p-4">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-faint">
-              {b.label}
-            </p>
-            <p
-              className={cn(
-                "mt-1.5 font-mono text-lg font-semibold",
-                i === 0 ? "text-fg" : i <= 2 ? "text-warn" : "text-danger"
-              )}
-            >
-              {formatBRL(b.amount)}
-            </p>
-            <p className="text-xs text-muted">
-              {b.count} {b.count === 1 ? "cobrança" : "cobranças"}
-            </p>
-          </Card>
-        ))}
+      {/* KPIs: argumentos dos devedores (motivos de não pagamento) */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        {(Object.keys(ARGUMENT_LABELS) as NegotiationArgument[]).map((key) => {
+          const count = all.filter((n) => n.argument === key).length;
+          return (
+            <Card key={key} className="p-4">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-faint">
+                {ARGUMENT_LABELS[key]}
+              </p>
+              <p className="mt-1.5 font-mono text-lg font-semibold text-fg">{count}</p>
+              <p className="text-xs text-muted">
+                {count === 1 ? "cliente" : "clientes"}
+              </p>
+            </Card>
+          );
+        })}
       </div>
 
       {/* Distribuição por status */}
@@ -347,6 +336,13 @@ export default function NegociacaoPage() {
                 <TR key={n.id}>
                   <TD>
                     <span className="font-medium">{n.clients?.name ?? "—"}</span>
+                    {n.argument && (
+                      <span className="mt-0.5 block">
+                        <span className="inline-block rounded-full bg-raised px-2 py-0.5 text-[10px] font-medium text-muted">
+                          {ARGUMENT_LABELS[n.argument]}
+                        </span>
+                      </span>
+                    )}
                     {n.notes && (
                       <span
                         className="block max-w-[260px] truncate text-xs text-faint"
@@ -513,6 +509,19 @@ export default function NegociacaoPage() {
               </div>
             </div>
           )}
+          <div>
+            <Label htmlFor="n-argument">Argumento do cliente</Label>
+            <Select
+              id="n-argument"
+              value={form.argument}
+              onChange={(e) => setForm({ ...form, argument: e.target.value as "" | NegotiationArgument })}
+            >
+              <option value="">Selecionar motivo...</option>
+              {(Object.keys(ARGUMENT_LABELS) as NegotiationArgument[]).map((k) => (
+                <option key={k} value={k}>{ARGUMENT_LABELS[k]}</option>
+              ))}
+            </Select>
+          </div>
           <div>
             <Label htmlFor="n-notes">O que foi negociado</Label>
             <Textarea

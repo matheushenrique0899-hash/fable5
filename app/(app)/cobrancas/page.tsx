@@ -11,6 +11,8 @@ import {
   deleteCharge,
   refreshOverdue,
   ensureNegotiationForClient,
+  listPayments,
+  deletePayment,
 } from "@/lib/services/charges";
 import { listAllClientsLite, updateClientPhone } from "@/lib/services/clients";
 import { listActiveNegotiationClientIds } from "@/lib/services/negotiations";
@@ -91,6 +93,7 @@ export default function CobrancasPage() {
   const [payDate, setPayDate] = useState("");
   const [payAmount, setPayAmount] = useState("");
   const [payError, setPayError] = useState<string | null>(null);
+  const [payHistory, setPayHistory] = useState<{ id: string; amount: number; paid_date: string }[]>([]);
 
   const [toast, setToast] = useState<string | null>(null);
   const [negotiatingIds, setNegotiatingIds] = useState<Set<string>>(new Set());
@@ -152,9 +155,9 @@ return () => clearTimeout(t);
     return d >= band.min && d <= band.max;
   });
 
-  const openTotal = visible
-    .filter((c) => c.status !== "pago")
-    .reduce((s, c) => s + Number(c.amount) - (c.paid_total ?? 0), 0);
+  const openCharges = visible.filter((c) => c.status !== "pago");
+  const openTotal = openCharges.reduce((s, c) => s + Number(c.amount), 0);
+  const openPaidPartial = openCharges.reduce((s, c) => s + (c.paid_total ?? 0), 0);
 
   // Busca por nome do cliente (parcial, case-insensitive)
   const searched = search.trim()
@@ -242,6 +245,19 @@ return () => clearTimeout(t);
     const remaining = Number(c.amount) - (c.paid_total ?? 0);
     setPayAmount(remaining.toFixed(2).replace(".", ","));
     setPayError(null);
+    setPayHistory([]);
+    listPayments(c.id).then((p) => setPayHistory(p as any)).catch(() => {});
+  }
+
+  async function handleDeletePayment(paymentId: string) {
+    if (!paying) return;
+    await deletePayment(paymentId, paying.id);
+    const updated = await listPayments(paying.id);
+    setPayHistory(updated as any);
+    await load();
+    // Atualiza o "paying" com o novo saldo
+    const fresh = charges.find((c) => c.id === paying.id);
+    if (fresh) setPaying(fresh);
   }
 
   async function confirmPay() {
@@ -401,6 +417,9 @@ return () => clearTimeout(t);
           <h1 className="text-xl font-semibold tracking-tight">Cobranças</h1>
           <p className="mt-1 text-sm text-muted">
             {formatBRL(openTotal)} em aberto
+            {openPaidPartial > 0 && (
+              <span className="text-accent"> · {formatBRL(openPaidPartial)} já recebido (parcial)</span>
+            )}
             {(filter !== "todas" || agingFilter !== "todas") && " (filtro aplicado)"}
           </p>
         </div>
@@ -634,8 +653,17 @@ return () => clearTimeout(t);
                             <Button
                               variant="ghost"
                               size="icon"
-                              aria-label="Criar negociação"
-                              title="Criar negociação para este cliente"
+                              aria-label={negotiatingIds.has(c.client_id) ? "Cliente em negociação" : "Criar negociação"}
+                              title={
+                                negotiatingIds.has(c.client_id)
+                                  ? "Já está em negociação — alguém está cuidando"
+                                  : "Criar negociação para este cliente"
+                              }
+                              className={
+                                negotiatingIds.has(c.client_id)
+                                  ? "bg-warn-soft text-warn hover:bg-warn/20"
+                                  : ""
+                              }
                               onClick={() => handleCreateNegotiation(c)}
                             >
                               <Handshake size={14} />
@@ -672,10 +700,7 @@ return () => clearTimeout(t);
             </span>
             <span className="font-mono text-sm font-semibold text-fg">
               {formatBRL(
-                paginated.reduce(
-                  (sum, c) => sum + Number(c.amount) - (c.paid_total ?? 0),
-                  0
-                )
+                paginated.reduce((sum, c) => sum + Number(c.amount), 0)
               )}
             </span>
           </div>
@@ -1078,10 +1103,44 @@ return () => clearTimeout(t);
               {payError}
             </p>
           )}
+
+          {/* Histórico de pagamentos desta cobrança */}
+          {payHistory.length > 0 && (
+            <div className="rounded-md border border-border bg-bg">
+              <p className="border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wide text-faint">
+                Pagamentos registrados
+              </p>
+              <ul className="divide-y divide-border/60">
+                {payHistory.map((pmt) => (
+                  <li key={pmt.id} className="flex items-center justify-between px-3 py-2 text-sm">
+                    <span className="text-muted">{formatDate(pmt.paid_date)}</span>
+                    <span className="flex items-center gap-3">
+                      <span className="font-mono text-accent">{formatBRL(Number(pmt.amount))}</span>
+                      <button
+                        onClick={() => handleDeletePayment(pmt.id)}
+                        className="text-faint transition-colors hover:text-danger"
+                        title="Remover este pagamento"
+                        aria-label="Remover pagamento"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <p className="border-t border-border px-3 py-2 text-right text-xs">
+                <span className="text-faint">Total recebido: </span>
+                <span className="font-mono font-semibold text-accent">
+                  {formatBRL(payHistory.reduce((s, p) => s + Number(p.amount), 0))}
+                </span>
+              </p>
+            </div>
+          )}
+
           <div className="flex justify-end gap-2 pt-1">
-            <Button variant="secondary" onClick={() => setPaying(null)}>Cancelar</Button>
+            <Button variant="secondary" onClick={() => setPaying(null)}>Fechar</Button>
             <Button variant="success" onClick={confirmPay}>
-              <CheckCircle2 size={14} /> Confirmar
+              <CheckCircle2 size={14} /> Registrar pagamento
             </Button>
           </div>
         </div>
