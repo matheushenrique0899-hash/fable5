@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Receipt, Plus, CheckCircle2, Trash2, Pencil, Handshake, Upload, Download, MessageCircle, FileDown, Search, RotateCcw } from "lucide-react";
+import { Receipt, Plus, CheckCircle2, Trash2, Pencil, Handshake, Upload, Download, MessageCircle, FileDown, Search, RotateCcw, ChevronRight } from "lucide-react";
 import {
   listCharges,
   createCharge,
@@ -91,6 +91,7 @@ export default function CobrancasPage() {
   const [deleting, setDeleting] = useState<Charge | null>(null);
   const [undoing, setUndoing] = useState<Charge | null>(null);
   const [undoLoading, setUndoLoading] = useState(false);
+  const [viewingClientId, setViewingClientId] = useState<string | null>(null);
 
   const [paying, setPaying] = useState<Charge | null>(null);
   const [payDate, setPayDate] = useState("");
@@ -168,7 +169,7 @@ return () => clearTimeout(t);
       )
     : visible;
 
-  // Ordenação dinâmica
+  // Ordenação dinâmica (nível de cobrança individual — usada no CSV e nos cálculos)
   const sorted = [...searched].sort((a, b) => {
     if (sortBy === "oldest") return a.due_date.localeCompare(b.due_date);
     if (sortBy === "newest") return b.due_date.localeCompare(a.due_date);
@@ -177,8 +178,72 @@ return () => clearTimeout(t);
     return 0;
   });
 
-  const totalPages = Math.max(Math.ceil(sorted.length / PAGE_SIZE), 1);
-  const paginated = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  // Agrupa por cliente: um cliente com várias cobranças vira uma linha só,
+  // com o total em aberto e um indicador "+N". Cliente com 1 cobrança
+  // só aparece normal, sem agrupamento (não precisa abrir nada).
+  const groups = useMemo(() => {
+    const map = new Map<string, Charge[]>();
+    for (const c of sorted) {
+      const arr = map.get(c.client_id) ?? [];
+      arr.push(c);
+      map.set(c.client_id, arr);
+    }
+    return Array.from(map.values()).map((groupCharges) => {
+      const allPaid = groupCharges.every((c) => c.status === "pago");
+      const total = allPaid
+        ? groupCharges.reduce((s, c) => s + Number(c.amount), 0)
+        : groupCharges.reduce(
+            (s, c) => s + (c.status === "pago" ? 0 : Number(c.amount) - (c.paid_total ?? 0)),
+            0
+          );
+      const worstStatus: ChargeStatus = groupCharges.some((c) => c.status === "atrasado")
+        ? "atrasado"
+        : groupCharges.some((c) => c.status === "pendente")
+        ? "pendente"
+        : "pago";
+      const earliestDue = groupCharges.reduce(
+        (min, c) => (c.due_date < min ? c.due_date : min),
+        groupCharges[0].due_date
+      );
+      return {
+        clientId: groupCharges[0].client_id,
+        charges: groupCharges,
+        total,
+        allPaid,
+        worstStatus,
+        earliestDue,
+      };
+    });
+  }, [sorted]);
+
+  // Mesma ordenação escolhida pelo usuário, só que aplicada ao grupo
+  const groupsSorted = [...groups].sort((a, b) => {
+    if (sortBy === "oldest") return a.earliestDue.localeCompare(b.earliestDue);
+    if (sortBy === "newest") return b.earliestDue.localeCompare(a.earliestDue);
+    if (sortBy === "highest") return b.total - a.total;
+    if (sortBy === "lowest") return a.total - b.total;
+    return 0;
+  });
+
+  const totalPages = Math.max(Math.ceil(groupsSorted.length / PAGE_SIZE), 1);
+  const paginatedGroups = groupsSorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  // Deriva do estado atual (não é um snapshot) — se uma ação dentro do modal
+  // mudar/zerar as cobranças do cliente, o modal reflete na hora.
+  const viewingGroup = viewingClientId ? groups.find((g) => g.clientId === viewingClientId) ?? null : null;
+
+  // Ordena as cobranças dentro do modal: em aberto primeiro (mais atrasada
+  // primeiro), pagas por último (mais recente primeiro).
+  const viewingCharges = viewingGroup
+    ? [...viewingGroup.charges].sort((a, b) => {
+        if (a.status === "pago" && b.status !== "pago") return 1;
+        if (b.status === "pago" && a.status !== "pago") return -1;
+        if (a.status === "pago" && b.status === "pago") {
+          return (b.paid_at ?? "").localeCompare(a.paid_at ?? "");
+        }
+        return a.due_date.localeCompare(b.due_date);
+      })
+    : [];
 
   function openCreate() {
     setEditing(null);
@@ -294,6 +359,81 @@ return () => clearTimeout(t);
     } finally {
       setUndoLoading(false);
     }
+  }
+
+  // Ações de uma cobrança individual — usada tanto na linha simples da
+  // tabela quanto dentro do modal de cobranças agrupadas por cliente.
+  function chargeActions(c: Charge) {
+    return (
+      <div className="flex justify-end gap-1 whitespace-nowrap">
+        {c.status !== "pago" && (
+          <>
+            {c.clients?.phone && (
+              <a
+                href={`https://wa.me/55${c.clients.phone}?text=${encodeURIComponent(
+                  `Olá ${c.clients?.name ?? ""}! Consta em aberto o valor de ${formatBRL(
+                    Number(c.amount) - (c.paid_total ?? 0)
+                  )} com vencimento em ${formatDate(c.due_date)}. Podemos conversar sobre a regularização?`
+                )}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Cobrar no WhatsApp"
+                  title="Cobrar no WhatsApp"
+                  className="hover:bg-accent-soft hover:text-accent"
+                >
+                  <MessageCircle size={14} />
+                </Button>
+              </a>
+            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={negotiatingIds.has(c.client_id) ? "Cliente em negociação" : "Criar negociação"}
+              title={
+                negotiatingIds.has(c.client_id)
+                  ? "Já está em negociação — alguém está cuidando"
+                  : "Criar negociação para este cliente"
+              }
+              className={negotiatingIds.has(c.client_id) ? "bg-warn-soft text-warn hover:bg-warn/20" : ""}
+              onClick={() => handleCreateNegotiation(c)}
+            >
+              <Handshake size={14} />
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => openPay(c)}>
+              <CheckCircle2 size={13} /> Receber
+            </Button>
+          </>
+        )}
+        {c.status === "pago" && (
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Desfazer pagamento"
+            title="Desfazer pagamento (marcado errado)"
+            className="hover:bg-warn-soft hover:text-warn"
+            onClick={() => setUndoing(c)}
+          >
+            <RotateCcw size={14} />
+          </Button>
+        )}
+        <Button variant="ghost" size="icon" aria-label="Editar" onClick={() => openEdit(c)}>
+          <Pencil size={14} />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Excluir"
+          className="hover:bg-danger-soft hover:text-danger"
+          onClick={() => setDeleting(c)}
+        >
+          <Trash2 size={14} />
+        </Button>
+      </div>
+    );
   }
 
   function exportCSV() {
@@ -572,130 +712,115 @@ return () => clearTimeout(t);
               </TR>
             </THead>
             <TBody>
-              {paginated.map((c) => {
-                const overdue = c.status === "atrasado" ? daysOverdue(c.due_date) : 0;
+              {paginatedGroups.map((g) => {
+                // Cliente com 1 cobrança só: linha normal, sem agrupar.
+                if (g.charges.length === 1) {
+                  const c = g.charges[0];
+                  const overdue = c.status === "atrasado" ? daysOverdue(c.due_date) : 0;
+                  return (
+                    <TR key={c.id}>
+                      <TD>
+                        <span className="flex items-center gap-2">
+                          <span className="font-medium">
+                            {c.clients?.name ?? "—"}
+                            {c.clients?.phone && (
+                              <span className="block font-mono text-[11px] font-normal text-faint">
+                                {c.clients.phone}
+                              </span>
+                            )}
+                          </span>
+                        </span>
+                      </TD>
+                      <TD className="font-mono">
+                        {formatBRL(Number(c.amount))}
+                        {(c.paid_total ?? 0) > 0 && c.status !== "pago" && (
+                          <span className="block text-[11px] text-accent">
+                            {formatBRL(c.paid_total ?? 0)} pago
+                          </span>
+                        )}
+                      </TD>
+                      <TD className="hidden text-muted lg:table-cell">
+                        {c.sale_date ? formatDate(c.sale_date) : "—"}
+                      </TD>
+                      <TD className="hidden font-mono text-muted 2xl:table-cell">
+                        {c.installments}x
+                      </TD>
+                      <TD>
+                        <span className={cn(c.status === "atrasado" ? "text-danger" : "text-muted")}>
+                          {formatDate(c.due_date)}
+                        </span>
+                        {overdue > 0 && (
+                          <span className="ml-2 font-mono text-xs text-danger">+{overdue}d</span>
+                        )}
+                        {c.status === "pago" && c.paid_at && (
+                          <span className="ml-2 font-mono text-xs text-accent">
+                            pago {formatDate(c.paid_at)}
+                          </span>
+                        )}
+                      </TD>
+                      <TD className="hidden max-w-[140px] 2xl:table-cell">
+                        {c.observation ? (
+                          <span className="block truncate text-xs text-muted" title={c.observation}>
+                            {c.observation}
+                          </span>
+                        ) : (
+                          <span className="text-faint">—</span>
+                        )}
+                      </TD>
+                      <TD><StatusBadge status={c.status} hasPaidPartial={(c.paid_total ?? 0) > 0} /></TD>
+                      <TD>{chargeActions(c)}</TD>
+                    </TR>
+                  );
+                }
+
+                // Cliente com várias cobranças: linha agrupada com o total
+                // e um "+N" — clicar abre o modal com cada cobrança.
+                const first = g.charges[0];
                 return (
-                  <TR key={c.id}>
+                  <TR
+                    key={g.clientId}
+                    className="cursor-pointer hover:bg-raised/60"
+                    onClick={() => setViewingClientId(g.clientId)}
+                  >
                     <TD>
                       <span className="flex items-center gap-2">
                         <span className="font-medium">
-                          {c.clients?.name ?? "—"}
-                          {c.clients?.phone && (
+                          {first.clients?.name ?? "—"}
+                          {first.clients?.phone && (
                             <span className="block font-mono text-[11px] font-normal text-faint">
-                              {c.clients.phone}
+                              {first.clients.phone}
                             </span>
                           )}
+                        </span>
+                        <span className="rounded-full bg-danger-soft px-2 py-0.5 text-[11px] font-medium text-danger">
+                          +{g.charges.length - 1}
                         </span>
                       </span>
                     </TD>
                     <TD className="font-mono">
-                      {formatBRL(Number(c.amount))}
-                      {(c.paid_total ?? 0) > 0 && c.status !== "pago" && (
-                        <span className="block text-[11px] text-accent">
-                          {formatBRL(c.paid_total ?? 0)} pago
-                        </span>
-                      )}
-                    </TD>
-                    <TD className="hidden text-muted lg:table-cell">
-                      {c.sale_date ? formatDate(c.sale_date) : "—"}
-                    </TD>
-                    <TD className="hidden font-mono text-muted 2xl:table-cell">
-                      {c.installments}x
-                    </TD>
-                    <TD>
-                      <span className={cn(c.status === "atrasado" ? "text-danger" : "text-muted")}>
-                        {formatDate(c.due_date)}
+                      {formatBRL(g.total)}
+                      <span className="block text-[11px] text-muted">
+                        {g.allPaid ? "recebido" : "em aberto"}
                       </span>
-                      {overdue > 0 && (
-                        <span className="ml-2 font-mono text-xs text-danger">+{overdue}d</span>
-                      )}
-                      {c.status === "pago" && c.paid_at && (
-                        <span className="ml-2 font-mono text-xs text-accent">
-                          pago {formatDate(c.paid_at)}
-                        </span>
-                      )}
                     </TD>
+                    <TD className="hidden text-muted lg:table-cell">—</TD>
+                    <TD className="hidden font-mono text-muted 2xl:table-cell">—</TD>
+                    <TD className="text-muted">{g.charges.length} cobranças</TD>
                     <TD className="hidden max-w-[140px] 2xl:table-cell">
-                      {c.observation ? (
-                        <span className="block truncate text-xs text-muted" title={c.observation}>
-                          {c.observation}
-                        </span>
-                      ) : (
-                        <span className="text-faint">—</span>
-                      )}
+                      <span className="text-faint">—</span>
                     </TD>
-                    <TD><StatusBadge status={c.status} hasPaidPartial={(c.paid_total ?? 0) > 0} /></TD>
+                    <TD><StatusBadge status={g.worstStatus} /></TD>
                     <TD>
-                      <div className="flex justify-end gap-1 whitespace-nowrap">
-                        {c.status !== "pago" && (
-                          <>
-                            {c.clients?.phone && (
-                              <a
-                                href={`https://wa.me/55${c.clients.phone}?text=${encodeURIComponent(
-                                  `Olá ${c.clients?.name ?? ""}! Consta em aberto o valor de ${formatBRL(
-                                    Number(c.amount) - (c.paid_total ?? 0)
-                                  )} com vencimento em ${formatDate(c.due_date)}. Podemos conversar sobre a regularização?`
-                                )}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                              >
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  aria-label="Cobrar no WhatsApp"
-                                  title="Cobrar no WhatsApp"
-                                  className="hover:bg-accent-soft hover:text-accent"
-                                >
-                                  <MessageCircle size={14} />
-                                </Button>
-                              </a>
-                            )}
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              aria-label={negotiatingIds.has(c.client_id) ? "Cliente em negociação" : "Criar negociação"}
-                              title={
-                                negotiatingIds.has(c.client_id)
-                                  ? "Já está em negociação — alguém está cuidando"
-                                  : "Criar negociação para este cliente"
-                              }
-                              className={
-                                negotiatingIds.has(c.client_id)
-                                  ? "bg-warn-soft text-warn hover:bg-warn/20"
-                                  : ""
-                              }
-                              onClick={() => handleCreateNegotiation(c)}
-                            >
-                              <Handshake size={14} />
-                            </Button>
-                            <Button variant="secondary" size="sm" onClick={() => openPay(c)}>
-                              <CheckCircle2 size={13} /> Receber
-                            </Button>
-                          </>
-                        )}
-                        {c.status === "pago" && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            aria-label="Desfazer pagamento"
-                            title="Desfazer pagamento (marcado errado)"
-                            className="hover:bg-warn-soft hover:text-warn"
-                            onClick={() => setUndoing(c)}
-                          >
-                            <RotateCcw size={14} />
-                          </Button>
-                        )}
-                        <Button variant="ghost" size="icon" aria-label="Editar" onClick={() => openEdit(c)}>
-                          <Pencil size={14} />
-                        </Button>
+                      <div className="flex justify-end">
                         <Button
-                          variant="ghost"
-                          size="icon"
-                          aria-label="Excluir"
-                          className="hover:bg-danger-soft hover:text-danger"
-                          onClick={() => setDeleting(c)}
+                          variant="secondary"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setViewingClientId(g.clientId);
+                          }}
                         >
-                          <Trash2 size={14} />
+                          Ver cobranças <ChevronRight size={13} />
                         </Button>
                       </div>
                     </TD>
@@ -705,14 +830,18 @@ return () => clearTimeout(t);
             </TBody>
           </Table>
         )}
-        {!loading && paginated.length > 0 && (
+        {!loading && paginatedGroups.length > 0 && (
           <div className="flex items-center justify-between border-t border-border bg-raised/40 px-5 py-3">
             <span className="text-xs font-medium text-muted">
-              Total desta página ({paginated.length} {paginated.length === 1 ? "cobrança" : "cobranças"})
+              Total desta página ({paginatedGroups.reduce((s, g) => s + g.charges.length, 0)} cobranças de{" "}
+              {paginatedGroups.length} {paginatedGroups.length === 1 ? "cliente" : "clientes"})
             </span>
             <span className="font-mono text-sm font-semibold text-fg">
               {formatBRL(
-                paginated.reduce((sum, c) => sum + Number(c.amount), 0)
+                paginatedGroups.reduce(
+                  (sum, g) => sum + g.charges.reduce((s, c) => s + Number(c.amount), 0),
+                  0
+                )
               )}
             </span>
           </div>
@@ -723,8 +852,8 @@ return () => clearTimeout(t);
       {totalPages > 1 && (
         <div className="flex items-center justify-between border-t border-border px-5 py-3">
           <p className="text-xs text-faint">
-            {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, visible.length)} de{" "}
-            {visible.length} cobranças
+            {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, groupsSorted.length)} de{" "}
+            {groupsSorted.length} {groupsSorted.length === 1 ? "cliente" : "clientes"}
           </p>
           <div className="flex gap-2">
             <Button
@@ -1167,6 +1296,66 @@ return () => clearTimeout(t);
             </Button>
           </div>
         </div>
+      </Dialog>
+
+      <Dialog
+        open={!!viewingGroup}
+        onClose={() => setViewingClientId(null)}
+        title={viewingGroup ? `${viewingGroup.charges[0].clients?.name ?? "Cliente"}` : "Cobranças"}
+        className="max-w-lg"
+      >
+        {viewingGroup && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between rounded-md bg-raised px-3 py-2">
+              <span className="text-xs text-muted">
+                {viewingGroup.charges.length} cobranças
+              </span>
+              <span className="font-mono text-sm font-semibold text-fg">
+                {formatBRL(viewingGroup.total)}
+                <span className="ml-1 text-[11px] font-normal text-muted">
+                  {viewingGroup.allPaid ? "recebido" : "em aberto"}
+                </span>
+              </span>
+            </div>
+            <div className="divide-y divide-border rounded-md border border-border">
+              {viewingCharges.map((c) => {
+                const overdue = c.status === "atrasado" ? daysOverdue(c.due_date) : 0;
+                return (
+                  <div key={c.id} className="space-y-2 px-3 py-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <span className="font-mono text-sm font-semibold text-fg">
+                          {formatBRL(Number(c.amount))}
+                        </span>
+                        {(c.paid_total ?? 0) > 0 && c.status !== "pago" && (
+                          <span className="ml-2 text-[11px] text-accent">
+                            {formatBRL(c.paid_total ?? 0)} pago
+                          </span>
+                        )}
+                        <span className={cn("ml-2 text-xs", c.status === "atrasado" ? "text-danger" : "text-muted")}>
+                          venc. {formatDate(c.due_date)}
+                        </span>
+                        {overdue > 0 && (
+                          <span className="ml-1 font-mono text-xs text-danger">+{overdue}d</span>
+                        )}
+                        {c.status === "pago" && c.paid_at && (
+                          <span className="ml-2 font-mono text-xs text-accent">
+                            pago {formatDate(c.paid_at)}
+                          </span>
+                        )}
+                      </div>
+                      <StatusBadge status={c.status} hasPaidPartial={(c.paid_total ?? 0) > 0} />
+                    </div>
+                    {c.observation && (
+                      <p className="text-xs text-muted">{c.observation}</p>
+                    )}
+                    {chargeActions(c)}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </Dialog>
 
       <Dialog open={!!undoing} onClose={() => setUndoing(null)} title="Desfazer pagamento">
