@@ -42,7 +42,10 @@ function parseDate(raw: string | undefined): Date | null {
 }
 
 // CSV: Código, Nome, Total, Data da Venda, Vencimento, Telefone, Observação
-// Agrupa por código: soma Total, usa venda/vencimento MAIS RECENTES.
+// Cada linha vira uma cobrança separada. Só agrupa (soma) linhas que são
+// EXATAMENTE a mesma venda (mesmo código + mesma data de venda + mesmo
+// vencimento) — isso evita contar duas vezes uma linha repetida na
+// planilha, sem juntar vendas diferentes do mesmo cliente numa só.
 export function parseNegotiationsCSV(text: string): {
   rows: ImportNegRow[];
   errors: string[];
@@ -69,7 +72,7 @@ export function parseNegotiationsCSV(text: string): {
   }
 
   const map = new Map<string, {
-    name: string; total: number; sale: Date; newest: Date;
+    code: string; name: string; total: number; sale: Date; due: Date;
     phone: string | null; observation: string | null;
   }>();
 
@@ -94,26 +97,26 @@ export function parseNegotiationsCSV(text: string): {
     const phone = rawPhone.length >= 10 ? rawPhone : null;
     const obs = iObs !== -1 ? (cols[iObs] ?? "").trim() || null : null;
 
-    const existing = map.get(code);
+    // Chave = mesma venda de verdade (código + data da venda + vencimento).
+    // Datas diferentes = cobranças diferentes, mesmo com o mesmo código.
+    const key = `${code}|${sale.toISOString().slice(0, 10)}|${due.toISOString().slice(0, 10)}`;
+
+    const existing = map.get(key);
     if (existing) {
       existing.total += total;
-      // Usa venda e vencimento MAIS RECENTES
-      if (due > existing.newest) existing.newest = due;
-      if (sale > existing.sale) existing.sale = sale;
       if (!existing.phone && phone) existing.phone = phone;
-      // Observação: concatena se houver mais de uma
       if (obs) existing.observation = existing.observation ? `${existing.observation}; ${obs}` : obs;
     } else {
-      map.set(code, { name, total, sale, newest: due, phone, observation: obs });
+      map.set(key, { code, name, total, sale, due, phone, observation: obs });
     }
   });
 
-  const rows: ImportNegRow[] = Array.from(map.entries()).map(([code, v]) => ({
-    code,
+  const rows: ImportNegRow[] = Array.from(map.values()).map((v) => ({
+    code: v.code,
     name: v.name,
     total: Math.round(v.total * 100) / 100,
     sale_date: v.sale.toISOString().slice(0, 10),
-    newest_due: v.newest.toISOString().slice(0, 10),
+    newest_due: v.due.toISOString().slice(0, 10),
     phone: v.phone,
     observation: v.observation,
   }));
