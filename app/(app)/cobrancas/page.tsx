@@ -2,13 +2,14 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Receipt, Plus, CheckCircle2, Trash2, Pencil, Handshake, Upload, Download, MessageCircle, FileDown, Search } from "lucide-react";
+import { Receipt, Plus, CheckCircle2, Trash2, Pencil, Handshake, Upload, Download, MessageCircle, FileDown, Search, RotateCcw } from "lucide-react";
 import {
   listCharges,
   createCharge,
   updateCharge,
   registerPayment,
   deleteCharge,
+  undoPayment,
   refreshOverdue,
   ensureNegotiationForClient,
   listPayments,
@@ -88,6 +89,8 @@ export default function CobrancasPage() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<Charge | null>(null);
+  const [undoing, setUndoing] = useState<Charge | null>(null);
+  const [undoLoading, setUndoLoading] = useState(false);
 
   const [paying, setPaying] = useState<Charge | null>(null);
   const [payDate, setPayDate] = useState("");
@@ -275,6 +278,21 @@ return () => clearTimeout(t);
       await load();
     } catch (e) {
       setPayError(e instanceof Error ? e.message : "Erro ao registrar pagamento.");
+    }
+  }
+
+  async function handleUndo() {
+    if (!undoing) return;
+    setUndoLoading(true);
+    try {
+      await undoPayment(undoing.id);
+      setUndoing(null);
+      setToast("Pagamento desfeito. A cobrança voltou a ficar em aberto.");
+      await load();
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : "Erro ao desfazer pagamento.");
+    } finally {
+      setUndoLoading(false);
     }
   }
 
@@ -654,6 +672,18 @@ return () => clearTimeout(t);
                               <CheckCircle2 size={13} /> Receber
                             </Button>
                           </>
+                        )}
+                        {c.status === "pago" && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label="Desfazer pagamento"
+                            title="Desfazer pagamento (marcado errado)"
+                            className="hover:bg-warn-soft hover:text-warn"
+                            onClick={() => setUndoing(c)}
+                          >
+                            <RotateCcw size={14} />
+                          </Button>
                         )}
                         <Button variant="ghost" size="icon" aria-label="Editar" onClick={() => openEdit(c)}>
                           <Pencil size={14} />
@@ -1136,6 +1166,22 @@ return () => clearTimeout(t);
               <CheckCircle2 size={14} /> Registrar pagamento
             </Button>
           </div>
+        </div>
+      </Dialog>
+
+      <Dialog open={!!undoing} onClose={() => setUndoing(null)} title="Desfazer pagamento">
+        <p className="text-sm text-muted">
+          Desfazer o pagamento de{" "}
+          <span className="font-mono text-fg">{undoing && formatBRL(Number(undoing.amount))}</span>{" "}
+          de <span className="font-medium text-fg">{undoing?.clients?.name}</span>? A cobrança volta
+          a ficar em aberto (pendente ou atrasada, conforme o vencimento) e o histórico de pagamento
+          desta cobrança é apagado.
+        </p>
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="secondary" onClick={() => setUndoing(null)}>Cancelar</Button>
+          <Button variant="danger" disabled={undoLoading} onClick={handleUndo}>
+            {undoLoading ? "Desfazendo..." : "Desfazer pagamento"}
+          </Button>
         </div>
       </Dialog>
 

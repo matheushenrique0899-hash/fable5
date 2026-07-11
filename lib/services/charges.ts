@@ -198,6 +198,26 @@ export async function ensureNegotiationForClient(clientId: string): Promise<"cri
   return "criada";
 }
 
+// Desfaz o pagamento de uma cobrança marcada como paga por engano:
+// remove todos os pagamentos registrados e reabre a cobrança
+// (volta para pendente/atrasado, conforme o vencimento).
+export async function undoPayment(chargeId: string) {
+  const supabase = createClient();
+  const { error: pe } = await supabase
+    .from("charge_payments")
+    .delete()
+    .eq("charge_id", chargeId);
+  if (pe) throw pe;
+
+  const { error: ce } = await supabase
+    .from("charges")
+    .update({ status: "pendente", paid_at: null })
+    .eq("id", chargeId);
+  if (ce) throw ce;
+
+  await supabase.rpc("refresh_overdue_charges");
+}
+
 export async function deleteCharge(id: string) {
   const supabase = createClient();
   const { error } = await supabase.from("charges").delete().eq("id", id);
