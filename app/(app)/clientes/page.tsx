@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Users, Plus, Search, Pencil, Trash2, ChevronLeft, ChevronRight, Upload, Download } from "lucide-react";
+import { Users, Plus, Search, Pencil, Trash2, ChevronLeft, ChevronRight, Upload, Download, AlertTriangle, Merge } from "lucide-react";
 import {
   listClients,
   createClientRecord,
@@ -10,8 +10,11 @@ import {
   parseClientsCSV,
   readCsvFile,
   importClients,
+  findDuplicateClients,
+  mergeClients,
   CSV_TEMPLATE,
   type ImportResult,
+  type DuplicateGroup,
 } from "@/lib/services/clients";
 import type { Client } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -21,7 +24,7 @@ import { Card } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { EmptyState } from "@/components/ui/empty-state";
-import { formatDate, formatDocument } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
 
 const emptyForm = { name: "", document: "", email: "", phone: "" };
 
@@ -46,6 +49,12 @@ export default function ClientesPage() {
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
 
+  const [duplicates, setDuplicates] = useState<DuplicateGroup[]>([]);
+  const [checkingDuplicates, setCheckingDuplicates] = useState(false);
+  const [dupOpen, setDupOpen] = useState(false);
+  const [primaryChoice, setPrimaryChoice] = useState<Record<string, string>>({});
+  const [merging, setMerging] = useState<string | null>(null);
+
   useEffect(() => {
     const t = setTimeout(() => { setDebounced(search); setPage(1); }, 350);
     return () => clearTimeout(t);
@@ -64,6 +73,33 @@ export default function ClientesPage() {
   }, [debounced, page]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { runDuplicateCheck(); }, []);
+
+  async function runDuplicateCheck() {
+    setCheckingDuplicates(true);
+    try {
+      const groups = await findDuplicateClients();
+      setDuplicates(groups);
+      const defaults: Record<string, string> = {};
+      groups.forEach((g) => { defaults[g.key] = g.clients[0].id; });
+      setPrimaryChoice((prev) => ({ ...defaults, ...prev }));
+    } finally {
+      setCheckingDuplicates(false);
+    }
+  }
+
+  async function handleMerge(group: DuplicateGroup) {
+    const primaryId = primaryChoice[group.key] ?? group.clients[0].id;
+    const others = group.clients.filter((c) => c.id !== primaryId).map((c) => c.id);
+    setMerging(group.key);
+    try {
+      await mergeClients(primaryId, others);
+      setDuplicates((prev) => prev.filter((g) => g.key !== group.key));
+      await load();
+    } finally {
+      setMerging(null);
+    }
+  }
 
   function openCreate() {
     setEditing(null);
@@ -87,9 +123,7 @@ export default function ClientesPage() {
   async function handleSave() {
     setFormError(null);
     if (!form.name.trim()) return setFormError("Informe o nome do cliente.");
-    const digits = form.document.replace(/\D/g, "");
-    if (digits.length !== 11 && digits.length !== 14)
-      return setFormError("CPF (11 dígitos) ou CNPJ (14 dígitos) inválido.");
+    if (!form.document.trim()) return setFormError("Informe o código do cliente.");
 
     setSaving(true);
     try {
@@ -171,11 +205,24 @@ export default function ClientesPage() {
         </div>
       </header>
 
+      {duplicates.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-warn/30 bg-warn-soft px-4 py-3 text-sm text-warn">
+          <span className="flex items-center gap-2">
+            <AlertTriangle size={15} />
+            {duplicates.length} {duplicates.length === 1 ? "nome duplicado encontrado" : "nomes duplicados encontrados"} —
+            provavelmente o mesmo cliente cadastrado mais de uma vez.
+          </span>
+          <Button variant="secondary" size="sm" onClick={() => setDupOpen(true)}>
+            <Merge size={13} /> Revisar e mesclar
+          </Button>
+        </div>
+      )}
+
       <div className="relative max-w-sm">
         <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
         <Input
           className="pl-9"
-          placeholder="Buscar por nome, documento ou e-mail"
+          placeholder="Buscar por nome, código ou e-mail"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -205,7 +252,7 @@ export default function ClientesPage() {
               <THead>
                 <TR>
                   <TH>Nome</TH>
-                  <TH>CPF / CNPJ</TH>
+                  <TH>Código</TH>
                   <TH className="hidden md:table-cell">Contato</TH>
                   <TH className="hidden md:table-cell">Cadastro</TH>
                   <TH className="text-right">Ações</TH>
@@ -215,7 +262,7 @@ export default function ClientesPage() {
                 {clients.map((c) => (
                   <TR key={c.id}>
                     <TD className="font-medium">{c.name}</TD>
-                    <TD className="font-mono text-muted">{formatDocument(c.document)}</TD>
+                    <TD className="font-mono text-muted">{c.document}</TD>
                     <TD className="hidden text-muted md:table-cell">
                       <span className="block">{c.email || "—"}</span>
                       {c.phone && <span className="font-mono text-xs text-faint">{c.phone}</span>}
@@ -271,8 +318,8 @@ export default function ClientesPage() {
             <Input id="c-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Ex.: Agro Silva Ltda" />
           </div>
           <div>
-            <Label htmlFor="c-doc">CPF ou CNPJ</Label>
-            <Input id="c-doc" className="font-mono" inputMode="numeric" value={form.document} onChange={(e) => setForm({ ...form, document: e.target.value })} placeholder="Somente números" />
+            <Label htmlFor="c-doc">Código</Label>
+            <Input id="c-doc" className="font-mono" value={form.document} onChange={(e) => setForm({ ...form, document: e.target.value })} placeholder="Ex.: 3091" />
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
@@ -308,7 +355,7 @@ export default function ClientesPage() {
             Exporte os clientes do seu ERP e salve como{" "}
             <span className="font-mono text-fg">CSV</span> (no Excel:{" "}
             <span className="text-fg">Salvar como → CSV</span>). Colunas na ordem:{" "}
-            <span className="font-mono text-xs text-fg">nome; documento; email; telefone</span>{" "}
+            <span className="font-mono text-xs text-fg">nome; código; email; telefone</span>{" "}
             — e-mail e telefone são opcionais.
           </p>
 
@@ -346,7 +393,7 @@ export default function ClientesPage() {
               </p>
               {importResult.duplicates > 0 && (
                 <p className="text-warn">
-                  {importResult.duplicates} ignorado(s): CPF/CNPJ já cadastrado
+                  {importResult.duplicates} ignorado(s): código já cadastrado
                 </p>
               )}
               {importResult.invalid.length > 0 && (
@@ -361,6 +408,73 @@ export default function ClientesPage() {
 
           <div className="flex justify-end pt-1">
             <Button variant="secondary" onClick={() => setImportOpen(false)}>Fechar</Button>
+          </div>
+        </div>
+      </Dialog>
+
+      {/* Duplicados: revisar e mesclar */}
+      <Dialog
+        open={dupOpen}
+        onClose={() => setDupOpen(false)}
+        title="Clientes duplicados"
+        className="max-w-lg"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-muted">
+            Mesmo nome, cadastros diferentes — geralmente acontece quando o mesmo cliente entra em
+            importações com "Código" diferente. Escolha qual cadastro manter; os outros são apagados
+            e as cobranças/negociações deles passam para o escolhido. Essa ação não pode ser desfeita.
+          </p>
+
+          {duplicates.length === 0 ? (
+            <p className="rounded-md bg-raised px-3 py-4 text-center text-sm text-muted">
+              Nenhum duplicado pendente.
+            </p>
+          ) : (
+            <div className="space-y-4">
+              {duplicates.map((g) => (
+                <div key={g.key} className="rounded-md border border-border p-3">
+                  <p className="mb-2 text-sm font-medium text-fg">{g.clients[0].name}</p>
+                  <div className="space-y-1.5">
+                    {g.clients.map((c) => (
+                      <label
+                        key={c.id}
+                        className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-raised"
+                      >
+                        <input
+                          type="radio"
+                          name={`primary-${g.key}`}
+                          checked={(primaryChoice[g.key] ?? g.clients[0].id) === c.id}
+                          onChange={() => setPrimaryChoice((prev) => ({ ...prev, [g.key]: c.id }))}
+                        />
+                        <span className="font-mono text-faint">{c.document}</span>
+                        <span className="text-muted">{c.phone || "sem telefone"}</span>
+                        <span className="ml-auto font-mono text-fg">
+                          {c.chargeCount} {c.chargeCount === 1 ? "cobrança" : "cobranças"}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                  <div className="mt-2 flex justify-end">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={merging === g.key}
+                      onClick={() => handleMerge(g)}
+                    >
+                      {merging === g.key ? "Mesclando..." : "Mesclar neste"}
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="secondary" onClick={runDuplicateCheck} disabled={checkingDuplicates}>
+              {checkingDuplicates ? "Verificando..." : "Verificar novamente"}
+            </Button>
+            <Button variant="secondary" onClick={() => setDupOpen(false)}>Fechar</Button>
           </div>
         </div>
       </Dialog>

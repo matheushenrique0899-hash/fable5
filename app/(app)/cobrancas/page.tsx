@@ -437,7 +437,7 @@ return () => clearTimeout(t);
   }
 
   function exportCSV() {
-    const header = "Cliente;Documento;Telefone;Valor;Pago;Saldo;Venda;Parcelas;Vencimento;Status;Dias em atraso";
+    const header = "Cliente;Código;Telefone;Valor;Pago;Saldo;Venda;Parcelas;Vencimento;Status;Dias em atraso";
     const rows = visible.map((c) => {
       const paid = c.paid_total ?? 0;
       const saldo = Number(c.amount) - paid;

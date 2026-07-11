@@ -205,71 +205,90 @@ export async function importNegotiations(
   const batchId = batch.id;
 
   // ---- Passo 1: resolver clientes ----
-  // Normaliza documento (código do ERP) e mapeia linha -> docKey
+  // O "Código" vem do ERP e não é confiável como identidade — a mesma
+  // pessoa pode vir com código diferente em cada exportação. Por isso o
+  // casamento de cliente aqui é pelo NOME (normalizado); o código só é
+  // usado como valor técnico pro campo "documento", que é obrigatório.
   const withDoc = toImport.map((r) => ({
     row: r,
-    docKey: r.code.replace(/\D/g, "").padStart(11, "0").slice(0, 11),
+    docKey: r.code.trim(),
+    nameKey: normalize(r.name),
   }));
 
-  // Busca TODOS os clientes já existentes desses documentos numa query só
-  const uniqueDocs = Array.from(new Set(withDoc.map((w) => w.docKey)));
-  const docToClientId = new Map<string, string>();
-  const docHasPhone = new Map<string, boolean>();
+  // Busca TODOS os clientes já existentes (para casar por nome)
+  const allExisting = await fetchAllRows<{ id: string; name: string; document: string; phone: string | null }>(
+    (from, to) =>
+      supabase
+        .from("clients")
+        .select("id, name, document, phone")
+        .eq("owner_id", user.id)
+        .range(from, to)
+  );
 
-  // Busca em blocos de 200 documentos (limite de URL do .in())
-  for (let i = 0; i < uniqueDocs.length; i += 200) {
-    const chunk = uniqueDocs.slice(i, i + 200);
-    const { data: existing } = await supabase
-      .from("clients")
-      .select("id, document, phone")
-      .eq("owner_id", user.id)
-      .in("document", chunk);
-    (existing ?? []).forEach((c) => {
-      docToClientId.set(c.document, c.id);
-      docHasPhone.set(c.document, !!c.phone);
-    });
+  const nameToClientId = new Map<string, string>();
+  const clientHasPhone = new Map<string, boolean>();
+  allExisting.forEach((c) => {
+    nameToClientId.set(normalize(c.name), c.id);
+    clientHasPhone.set(c.id, !!c.phone);
+  });
+
+  // Cria os clientes que ainda não existem (1 por nome novo neste import)
+  const newByName = new Map<string, { name: string; document: string; phone: string | null }>();
+  for (const w of withDoc) {
+    if (nameToClientId.has(w.nameKey)) continue;
+    if (!newByName.has(w.nameKey)) {
+      newByName.set(w.nameKey, { name: w.row.name, document: w.docKey, phone: w.row.phone });
+    }
   }
 
-  // Cria os clientes que ainda não existem, em lote
-  const newClientDocs = uniqueDocs.filter((d) => !docToClientId.has(d));
-  if (newClientDocs.length > 0) {
-    // Para cada doc novo, pega o nome/telefone da primeira linha correspondente
-    const newClientsPayload = newClientDocs.map((doc) => {
-      const w = withDoc.find((x) => x.docKey === doc)!;
-      return {
-        owner_id: user.id,
-        name: w.row.name,
-        document: doc,
-        phone: w.row.phone,
-      };
-    });
-    for (let i = 0; i < newClientsPayload.length; i += 500) {
-      const chunk = newClientsPayload.slice(i, i + 500);
-      const { data: inserted, error: ce } = await supabase
-        .from("clients")
-        .insert(chunk)
-        .select("id, document");
-      if (ce) {
-        errors.push(`Erro ao criar clientes: ${ce.message}`);
+  if (newByName.size > 0) {
+    const payload = Array.from(newByName.values());
+    for (let i = 0; i < payload.length; i += 500) {
+      const chunk = payload.map((p) => ({ owner_id: user.id, name: p.name, document: p.document, phone: p.phone })).slice(i, i + 500);
+      const { data: inserted, error: ce } = await supabase.from("clients").insert(chunk).select("id, name");
+      if (!ce) {
+        (inserted ?? []).forEach((c) => nameToClientId.set(normalize(c.name), c.id));
+      } else if (ce.code === "23505") {
+        // Dois nomes diferentes caíram no mesmo "documento" (código
+        // duplicado/vazio) — insere um a um pra não perder o lote inteiro.
+        for (const p of chunk) {
+          const { data: single, error: se } = await supabase.from("clients").insert(p).select("id, name").single();
+          if (!se) {
+            nameToClientId.set(normalize(single.name), single.id);
+          } else if (se.code === "23505") {
+            const fallbackDoc = String(Date.now()).padStart(11, "0").slice(-11);
+            const { data: retry, error: re } = await supabase
+              .from("clients")
+              .insert({ ...p, document: fallbackDoc })
+              .select("id, name")
+              .single();
+            if (!re) nameToClientId.set(normalize(retry.name), retry.id);
+            else errors.push(`${p.name}: cliente não pôde ser criado (${re.message})`);
+          } else {
+            errors.push(`${p.name}: cliente não pôde ser criado (${se.message})`);
+          }
+        }
       } else {
-        (inserted ?? []).forEach((c) => docToClientId.set(c.document, c.id));
+        errors.push(`Erro ao criar clientes: ${ce.message}`);
       }
     }
   }
 
   // Completa telefone de clientes que existiam sem telefone
-  const phoneUpdates = withDoc.filter(
-    (w) => docToClientId.has(w.docKey) && docHasPhone.get(w.docKey) === false && w.row.phone
-  );
+  const phoneUpdates = withDoc.filter((w) => {
+    const cid = nameToClientId.get(w.nameKey);
+    return cid && clientHasPhone.get(cid) === false && w.row.phone;
+  });
   for (const w of phoneUpdates) {
-    await supabase.from("clients").update({ phone: w.row.phone }).eq("id", docToClientId.get(w.docKey)!);
-    docHasPhone.set(w.docKey, true); // evita repetir
+    const cid = nameToClientId.get(w.nameKey)!;
+    await supabase.from("clients").update({ phone: w.row.phone }).eq("id", cid);
+    clientHasPhone.set(cid, true);
   }
 
   // ---- Passo 2: inserir cobranças em lote ----
   const chargesPayload = withDoc
     .map((w) => {
-      const clientId = docToClientId.get(w.docKey);
+      const clientId = nameToClientId.get(w.nameKey);
       if (!clientId) {
         errors.push(`${w.row.name}: cliente não pôde ser criado`);
         skipped++;
