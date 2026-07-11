@@ -114,12 +114,14 @@ export default function CobrancasPage() {
   // Reset página quando filtro ou busca muda
   useEffect(() => { setPage(1); }, [filter, agingFilter, search, sortBy]);
 
+  // Busca todas as cobranças uma única vez; a troca de aba (Todas/Pendentes/
+  // Atrasadas/Pagas) filtra em memória, sem nova consulta ao Supabase.
   const load = useCallback(async () => {
     setLoading(true);
     try {
       await refreshOverdue();
       const [chargesData, negIds] = await Promise.all([
-        listCharges(filter),
+        listCharges("todas"),
         listActiveNegotiationClientIds(),
       ]);
       setCharges(chargesData);
@@ -127,7 +129,7 @@ export default function CobrancasPage() {
     } finally {
       setLoading(false);
     }
-  }, [filter]);
+  }, []);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { listAllClientsLite().then(setClients); }, []);
@@ -148,6 +150,7 @@ return () => clearTimeout(t);
   }, [toast]);
 
   const visible = charges.filter((c) => {
+    if (filter !== "todas" && c.status !== filter) return false;
     if (agingFilter === "todas") return true;
     if (c.status === "pago") return false;
     const d = daysOverdue(c.due_date);
