@@ -253,3 +253,39 @@ export async function mergeClients(primaryId: string, duplicateIds: string[]): P
   const { error: e3 } = await supabase.from("clients").delete().in("id", duplicateIds);
   if (e3) throw e3;
 }
+
+// ---------- Limpar cadastros sem uso ----------
+// Seguro por definição: só considera clientes que não têm NENHUMA
+// cobrança nem negociação vinculada — não há nada em cascata a perder.
+export async function findClientsWithoutCharges(): Promise<Client[]> {
+  const supabase = createClient();
+  const allClients = await fetchAllRows<Client>((from, to) =>
+    supabase.from("clients").select("*").order("name").range(from, to)
+  );
+  if (allClients.length === 0) return [];
+
+  const allIds = allClients.map((c) => c.id);
+  const linkedIds = new Set<string>();
+  for (let i = 0; i < allIds.length; i += 200) {
+    const chunk = allIds.slice(i, i + 200);
+    const { data: charges } = await supabase.from("charges").select("client_id").in("client_id", chunk);
+    (charges ?? []).forEach((r: any) => linkedIds.add(r.client_id));
+    const { data: negs } = await supabase.from("negotiations").select("client_id").in("client_id", chunk);
+    (negs ?? []).forEach((r: any) => linkedIds.add(r.client_id));
+  }
+
+  return allClients.filter((c) => !linkedIds.has(c.id));
+}
+
+export async function deleteClientsBulk(ids: string[]): Promise<number> {
+  if (ids.length === 0) return 0;
+  const supabase = createClient();
+  let deleted = 0;
+  for (let i = 0; i < ids.length; i += 200) {
+    const chunk = ids.slice(i, i + 200);
+    const { error, count } = await supabase.from("clients").delete({ count: "exact" }).in("id", chunk);
+    if (error) throw error;
+    deleted += count ?? chunk.length;
+  }
+  return deleted;
+}

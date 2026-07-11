@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Users, Plus, Search, Pencil, Trash2, ChevronLeft, ChevronRight, Upload, Download, AlertTriangle, Merge } from "lucide-react";
+import { Users, Plus, Search, Pencil, Trash2, ChevronLeft, ChevronRight, Upload, Download, AlertTriangle, Merge, Eraser } from "lucide-react";
 import {
   listClients,
   createClientRecord,
@@ -12,6 +12,8 @@ import {
   importClients,
   findDuplicateClients,
   mergeClients,
+  findClientsWithoutCharges,
+  deleteClientsBulk,
   CSV_TEMPLATE,
   type ImportResult,
   type DuplicateGroup,
@@ -55,6 +57,11 @@ export default function ClientesPage() {
   const [primaryChoice, setPrimaryChoice] = useState<Record<string, string>>({});
   const [confirmedSame, setConfirmedSame] = useState<Record<string, boolean>>({});
   const [merging, setMerging] = useState<string | null>(null);
+
+  const [cleanupOpen, setCleanupOpen] = useState(false);
+  const [checkingCleanup, setCheckingCleanup] = useState(false);
+  const [emptyClients, setEmptyClients] = useState<Client[] | null>(null);
+  const [cleaningUp, setCleaningUp] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => { setDebounced(search); setPage(1); }, 350);
@@ -100,6 +107,30 @@ export default function ClientesPage() {
       await load();
     } finally {
       setMerging(null);
+    }
+  }
+
+  async function openCleanup() {
+    setCleanupOpen(true);
+    setCheckingCleanup(true);
+    try {
+      const found = await findClientsWithoutCharges();
+      setEmptyClients(found);
+    } finally {
+      setCheckingCleanup(false);
+    }
+  }
+
+  async function handleCleanup() {
+    if (!emptyClients || emptyClients.length === 0) return;
+    setCleaningUp(true);
+    try {
+      await deleteClientsBulk(emptyClients.map((c) => c.id));
+      setEmptyClients([]);
+      setCleanupOpen(false);
+      await load();
+    } finally {
+      setCleaningUp(false);
     }
   }
 
@@ -195,6 +226,9 @@ export default function ClientesPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Button variant="secondary" onClick={openCleanup}>
+            <Eraser size={15} /> Limpar sem cobrança
+          </Button>
           <Button
             variant="secondary"
             onClick={() => { setImportResult(null); setImportError(null); setImportOpen(true); }}
@@ -489,6 +523,55 @@ export default function ClientesPage() {
               {checkingDuplicates ? "Verificando..." : "Verificar novamente"}
             </Button>
             <Button variant="secondary" onClick={() => setDupOpen(false)}>Fechar</Button>
+          </div>
+        </div>
+      </Dialog>
+
+      {/* Limpar cadastros sem cobrança */}
+      <Dialog
+        open={cleanupOpen}
+        onClose={() => setCleanupOpen(false)}
+        title="Limpar clientes sem cobrança"
+        className="max-w-lg"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-muted">
+            Isto apaga cadastros de cliente que não têm{" "}
+            <span className="font-medium text-fg">nenhuma cobrança nem negociação</span> vinculada — não
+            afeta cobranças de jeito nenhum, porque só considera quem não tem nenhuma.
+          </p>
+
+          {checkingCleanup ? (
+            <p className="rounded-md bg-raised px-3 py-4 text-center text-sm text-muted">Verificando...</p>
+          ) : emptyClients && emptyClients.length > 0 ? (
+            <>
+              <div className="max-h-64 space-y-1 overflow-y-auto rounded-md border border-border p-2">
+                {emptyClients.map((c) => (
+                  <div key={c.id} className="flex items-center justify-between px-2 py-1 text-xs">
+                    <span className="text-fg">{c.name}</span>
+                    <span className="font-mono text-faint">{c.document}</span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-sm font-medium text-fg">
+                {emptyClients.length} {emptyClients.length === 1 ? "cadastro será apagado" : "cadastros serão apagados"}.
+              </p>
+            </>
+          ) : (
+            <p className="rounded-md bg-raised px-3 py-4 text-center text-sm text-muted">
+              Nenhum cadastro sem cobrança encontrado.
+            </p>
+          )}
+
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="secondary" onClick={() => setCleanupOpen(false)}>Cancelar</Button>
+            <Button
+              variant="danger"
+              disabled={cleaningUp || checkingCleanup || !emptyClients || emptyClients.length === 0}
+              onClick={handleCleanup}
+            >
+              {cleaningUp ? "Apagando..." : `Apagar ${emptyClients?.length ?? 0} cadastro(s)`}
+            </Button>
           </div>
         </div>
       </Dialog>
