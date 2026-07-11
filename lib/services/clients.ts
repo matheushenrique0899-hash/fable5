@@ -187,10 +187,10 @@ export async function updateClientPhone(clientId: string, phone: string) {
   if (error) throw error;
 }
 
-// ---------- Clientes duplicados (mesmo nome, cadastros diferentes) ----------
-// Comum quando a importação usa "Código" do ERP em vez de CPF/CNPJ real:
-// o mesmo cliente pode ter chegado com códigos diferentes em importações
-// distintas e virado 2+ cadastros.
+// ---------- Nomes repetidos (revisão manual, não mescla sozinho) ----------
+// A identidade do cliente é o CÓDIGO, não o nome — código diferente pode
+// ser mesmo pessoas diferentes com nome igual. Esta função só sinaliza
+// candidatos pra revisão humana; nunca decide sozinha que é duplicado.
 
 function normalizeName(s: string): string {
   return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim().replace(/\s+/g, " ");

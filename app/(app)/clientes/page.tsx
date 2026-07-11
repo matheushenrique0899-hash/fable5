@@ -53,6 +53,7 @@ export default function ClientesPage() {
   const [checkingDuplicates, setCheckingDuplicates] = useState(false);
   const [dupOpen, setDupOpen] = useState(false);
   const [primaryChoice, setPrimaryChoice] = useState<Record<string, string>>({});
+  const [confirmedSame, setConfirmedSame] = useState<Record<string, boolean>>({});
   const [merging, setMerging] = useState<string | null>(null);
 
   useEffect(() => {
@@ -95,6 +96,7 @@ export default function ClientesPage() {
     try {
       await mergeClients(primaryId, others);
       setDuplicates((prev) => prev.filter((g) => g.key !== group.key));
+      setConfirmedSame((prev) => { const n = { ...prev }; delete n[group.key]; return n; });
       await load();
     } finally {
       setMerging(null);
@@ -209,11 +211,11 @@ export default function ClientesPage() {
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-warn/30 bg-warn-soft px-4 py-3 text-sm text-warn">
           <span className="flex items-center gap-2">
             <AlertTriangle size={15} />
-            {duplicates.length} {duplicates.length === 1 ? "nome duplicado encontrado" : "nomes duplicados encontrados"} —
-            provavelmente o mesmo cliente cadastrado mais de uma vez.
+            {duplicates.length} {duplicates.length === 1 ? "nome repetido encontrado" : "nomes repetidos encontrados"} —
+            pode ser o mesmo cliente com código errado, ou pessoas diferentes com nome igual.
           </span>
           <Button variant="secondary" size="sm" onClick={() => setDupOpen(true)}>
-            <Merge size={13} /> Revisar e mesclar
+            <Merge size={13} /> Revisar
           </Button>
         </div>
       )}
@@ -412,23 +414,25 @@ export default function ClientesPage() {
         </div>
       </Dialog>
 
-      {/* Duplicados: revisar e mesclar */}
+      {/* Nomes repetidos: revisar antes de mesclar */}
       <Dialog
         open={dupOpen}
         onClose={() => setDupOpen(false)}
-        title="Clientes duplicados"
+        title="Nomes repetidos"
         className="max-w-lg"
       >
         <div className="space-y-4">
           <p className="text-sm text-muted">
-            Mesmo nome, cadastros diferentes — geralmente acontece quando o mesmo cliente entra em
-            importações com "Código" diferente. Escolha qual cadastro manter; os outros são apagados
-            e as cobranças/negociações deles passam para o escolhido. Essa ação não pode ser desfeita.
+            O sistema identifica cliente pelo <span className="font-medium text-fg">código</span>, não
+            pelo nome. Os cadastros abaixo têm o mesmo nome, mas podem ser a mesma pessoa (código errado
+            por engano) ou pessoas diferentes de fato. Confira antes de mesclar — a ação apaga os
+            cadastros não escolhidos e move as cobranças/negociações deles para o principal, e não pode
+            ser desfeita.
           </p>
 
           {duplicates.length === 0 ? (
             <p className="rounded-md bg-raised px-3 py-4 text-center text-sm text-muted">
-              Nenhum duplicado pendente.
+              Nenhum nome repetido pendente.
             </p>
           ) : (
             <div className="space-y-4">
@@ -455,11 +459,21 @@ export default function ClientesPage() {
                       </label>
                     ))}
                   </div>
+                  <label className="mt-3 flex cursor-pointer items-start gap-2 text-xs text-muted">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      checked={!!confirmedSame[g.key]}
+                      onChange={(e) => setConfirmedSame((prev) => ({ ...prev, [g.key]: e.target.checked }))}
+                    />
+                    Confirmo que é a mesma pessoa (conferi telefone/código) — não são clientes diferentes
+                    com nome parecido.
+                  </label>
                   <div className="mt-2 flex justify-end">
                     <Button
                       variant="secondary"
                       size="sm"
-                      disabled={merging === g.key}
+                      disabled={merging === g.key || !confirmedSame[g.key]}
                       onClick={() => handleMerge(g)}
                     >
                       {merging === g.key ? "Mesclando..." : "Mesclar neste"}
