@@ -55,13 +55,10 @@ export default function AdminPage() {
 
   async function loadTenants() {
     const supabase = createClient();
-    const { data, error } = await supabase
-      .from("admin_users_view")
-      .select("*")
-      .order("created_at", { ascending: false });
+    const { data, error } = await supabase.rpc("admin_list_users");
 
     if (error) {
-      setError("Sem permissão para carregar usuários. Rode o SQL da view no Supabase.");
+      setError("Sem permissão para carregar usuários. Rode o SQL da migração 10 no Supabase.");
       setTenants([]);
       return;
     }
