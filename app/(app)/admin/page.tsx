@@ -58,7 +58,7 @@ export default function AdminPage() {
     const { data, error } = await supabase.rpc("admin_list_users");
 
     if (error) {
-      setError("Sem permissão para carregar usuários. Rode o SQL da migração 10 no Supabase.");
+      setError(`Erro ao carregar usuários: ${error.message} (code: ${error.code ?? "?"})`);
       setTenants([]);
       return;
     }
