@@ -15,7 +15,7 @@ import {
   applyAgreementToCharges,
   listLastContacts,
 } from "@/lib/services/negotiations";
-import { refreshOverdue, getClientDebtSummary } from "@/lib/services/charges";
+import { refreshOverdue } from "@/lib/services/charges";
 import { listAllClientsLite } from "@/lib/services/clients";
 import type { Negotiation, NegotiationStatus, NegotiationContact, AgreementInstallment, NegotiationArgument } from "@/lib/types";
 import { NEGOTIATION_LABELS, ARGUMENT_LABELS } from "@/lib/types";
@@ -92,7 +92,6 @@ export default function NegociacaoPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Negotiation | null>(null);
   const [form, setForm] = useState(emptyForm);
-  const [clientDebt, setClientDebt] = useState<{ totalDebt: number; totalPaid: number } | null>(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<Negotiation | null>(null);
@@ -152,8 +151,6 @@ export default function NegociacaoPage() {
       promised_payment_amount: n.promised_payment_amount ? String(n.promised_payment_amount).replace(".", ",") : "",
     });
     setFormError(null);
-    setClientDebt(null);
-    getClientDebtSummary(n.client_id).then(setClientDebt);
     setDialogOpen(true);
   }
 
@@ -565,18 +562,19 @@ export default function NegociacaoPage() {
               </div>
             </div>
           )}
-          {clientDebt && (clientDebt.totalDebt > 0 || clientDebt.totalPaid > 0) && (
-            <div className="flex items-center justify-between rounded-md bg-raised px-3 py-2 text-sm">
-              <span className="text-muted">Valor em aberto (dívida total)</span>
-              <span className="font-mono font-medium text-fg">{formatBRL(clientDebt.totalDebt)}</span>
-            </div>
-          )}
-          {clientDebt && clientDebt.totalPaid > 0 && (
-            <div className="flex items-center justify-between rounded-md bg-accent-soft px-3 py-2 text-sm">
-              <span className="text-accent">Já pago parcialmente</span>
-              <span className="font-mono font-medium text-accent">{formatBRL(clientDebt.totalPaid)}</span>
-            </div>
-          )}
+          <div>
+            <Label htmlFor="n-argument">Argumento do cliente</Label>
+            <Select
+              id="n-argument"
+              value={form.argument}
+              onChange={(e) => setForm({ ...form, argument: e.target.value as "" | NegotiationArgument })}
+            >
+              <option value="">Selecionar motivo...</option>
+              {(Object.keys(ARGUMENT_LABELS) as NegotiationArgument[]).map((k) => (
+                <option key={k} value={k}>{ARGUMENT_LABELS[k]}</option>
+              ))}
+            </Select>
+          </div>
           <div className="grid grid-cols-1 gap-4 rounded-md border border-warn/25 bg-warn-soft/40 p-3 sm:grid-cols-2">
             <div>
               <Label htmlFor="n-promise-date">Promessa de pagamento (data)</Label>

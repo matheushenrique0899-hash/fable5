@@ -40,36 +40,6 @@ export async function listCharges(status?: ChargeStatus | "todas") {
   return charges;
 }
 
-// Resumo da dívida em aberto de um cliente: soma das cobranças não pagas
-// e quanto já foi pago parcialmente nelas. Usado na negociação para mostrar
-// o valor real da dívida (a promessa de pagamento não entra nessa conta —
-// ela é só o que o cliente disse que vai fazer, não o que já está lançado).
-export async function getClientDebtSummary(
-  clientId: string
-): Promise<{ totalDebt: number; totalPaid: number }> {
-  const supabase = createClient();
-  const openCharges = await fetchAllRows<{ id: string; amount: number }>((from, to) =>
-    supabase
-      .from("charges")
-      .select("id, amount")
-      .eq("client_id", clientId)
-      .neq("status", "pago")
-      .range(from, to)
-  );
-
-  const totalDebt = openCharges.reduce((s, c) => s + Number(c.amount), 0);
-
-  let totalPaid = 0;
-  const ids = openCharges.map((c) => c.id);
-  for (let i = 0; i < ids.length; i += 200) {
-    const chunk = ids.slice(i, i + 200);
-    const { data } = await supabase.from("charge_payments").select("amount").in("charge_id", chunk);
-    totalPaid += (data ?? []).reduce((s, p) => s + Number(p.amount), 0);
-  }
-
-  return { totalDebt, totalPaid };
-}
-
 export async function createCharge(input: {
   client_id: string;
   amount: number;
