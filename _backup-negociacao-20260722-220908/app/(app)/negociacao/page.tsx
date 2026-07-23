@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Handshake, Pencil, Trash2, History, Plus, CheckCircle2, RotateCcw, MessageCircle, CalendarClock } from "lucide-react";
+import { Handshake, Pencil, Trash2, History, Plus, CheckCircle2, RotateCcw } from "lucide-react";
 import {
   listNegotiations,
   updateNegotiation,
@@ -13,7 +13,6 @@ import {
   payInstallment,
   unpayInstallment,
   applyAgreementToCharges,
-  listLastContacts,
 } from "@/lib/services/negotiations";
 import { refreshOverdue } from "@/lib/services/charges";
 import { listAllClientsLite } from "@/lib/services/clients";
@@ -48,25 +47,6 @@ const STATUS_STYLE: Record<NegotiationStatus, { badge: string; bar: string }> = 
   nao_localizado:     { badge: "bg-raised text-muted border-border",          bar: "bg-faint" },
 };
 
-function initials(name?: string | null): string {
-  if (!name) return "?";
-  const parts = name.trim().split(/\s+/);
-  const first = parts[0]?.[0] ?? "";
-  const last = parts.length > 1 ? parts[parts.length - 1][0] : "";
-  return (first + last).toUpperCase();
-}
-
-// "hoje" / "ontem" / "há N dias" — para o snippet de último contato na linha
-function relativeDays(dateStr: string): string {
-  const date = new Date(dateStr + "T12:00:00");
-  const today = new Date();
-  today.setHours(12, 0, 0, 0);
-  const days = Math.round((today.getTime() - date.getTime()) / 86_400_000);
-  if (days <= 0) return "hoje";
-  if (days === 1) return "ontem";
-  return `há ${days} dias`;
-}
-
 const emptyForm = {
   client_id: "",
   status: "em_negociacao" as NegotiationStatus,
@@ -78,13 +58,10 @@ const emptyForm = {
   agreed_amount: "",
   agreed_installments: "",
   agreed_due: "",
-  promised_payment_date: "",
-  promised_payment_amount: "",
 };
 
 export default function NegociacaoPage() {
   const [all, setAll] = useState<Negotiation[]>([]);
-  const [lastContacts, setLastContacts] = useState<Map<string, NegotiationContact>>(new Map());
   const [clients, setClients] = useState<{ id: string; name: string }[]>([]);
   const [filter, setFilter] = useState<Filter>("todas");
   const [loading, setLoading] = useState(true);
@@ -114,7 +91,6 @@ export default function NegociacaoPage() {
       await refreshOverdue();
       const negotiations = await listNegotiations("todas");
       setAll(negotiations);
-      listLastContacts(negotiations.map((n) => n.id)).then(setLastContacts);
     } finally {
       setLoading(false);
     }
@@ -147,8 +123,6 @@ export default function NegociacaoPage() {
       agreed_amount: n.agreed_amount ? String(n.agreed_amount).replace(".", ",") : "",
       agreed_installments: n.agreed_installments ? String(n.agreed_installments) : "",
       agreed_due: n.agreed_due ?? "",
-      promised_payment_date: n.promised_payment_date ?? "",
-      promised_payment_amount: n.promised_payment_amount ? String(n.promised_payment_amount).replace(".", ",") : "",
     });
     setFormError(null);
     setDialogOpen(true);
@@ -174,10 +148,6 @@ export default function NegociacaoPage() {
         ? Math.max(parseInt(form.agreed_installments) || 1, 1)
         : null;
       const agreedDue = agreed ? form.agreed_due || null : null;
-      const promisedAmount = form.promised_payment_amount
-        ? Number(form.promised_payment_amount.replace(/\./g, "").replace(",", "."))
-        : null;
-      const promisedDate = form.promised_payment_date || null;
 
       const payload = {
         ...form,
@@ -185,8 +155,6 @@ export default function NegociacaoPage() {
         agreed_amount: agreedAmount,
         agreed_installments: agreedInst,
         agreed_due: agreedDue,
-        promised_payment_date: promisedDate,
-        promised_payment_amount: promisedAmount,
       };
       if (editing) {
         await updateNegotiation(editing.id, payload);
@@ -349,29 +317,22 @@ export default function NegociacaoPage() {
               {filtered.map((n) => (
                 <TR key={n.id}>
                   <TD>
-                    <div className="flex items-start gap-2.5">
-                      <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-soft text-[11px] font-medium text-accent">
-                        {initials(n.clients?.name)}
+                    <span className="font-medium">{n.clients?.name ?? "—"}</span>
+                    {n.argument && (
+                      <span className="mt-0.5 block">
+                        <span className="inline-block rounded-full bg-raised px-2 py-0.5 text-[10px] font-medium text-muted">
+                          {ARGUMENT_LABELS[n.argument]}
+                        </span>
                       </span>
-                      <div className="min-w-0">
-                        <span className="block truncate font-medium">{n.clients?.name ?? "—"}</span>
-                        {lastContacts.get(n.id) ? (
-                          <span className="mt-0.5 flex items-center gap-1 text-xs text-faint">
-                            <MessageCircle size={11} className="shrink-0" />
-                            <span className="max-w-[220px] truncate" title={lastContacts.get(n.id)!.note}>
-                              {lastContacts.get(n.id)!.note}
-                            </span>
-                            <span className="shrink-0">· {relativeDays(lastContacts.get(n.id)!.contact_date)}</span>
-                          </span>
-                        ) : n.argument ? (
-                          <span className="mt-0.5 block">
-                            <span className="inline-block rounded-full bg-raised px-2 py-0.5 text-[10px] font-medium text-muted">
-                              {ARGUMENT_LABELS[n.argument]}
-                            </span>
-                          </span>
-                        ) : null}
-                      </div>
-                    </div>
+                    )}
+                    {n.notes && (
+                      <span
+                        className="block max-w-[260px] truncate text-xs text-faint"
+                        title={n.notes}
+                      >
+                        {n.notes}
+                      </span>
+                    )}
                   </TD>
                   <TD className="hidden text-muted md:table-cell">{n.responsible || "—"}</TD>
                   <TD className="hidden text-muted lg:table-cell">
@@ -394,13 +355,6 @@ export default function NegociacaoPage() {
                       <span className="mt-1 block font-mono text-[11px] text-accent">
                         {formatBRL(Number(n.agreed_amount))}
                         {n.agreed_installments ? ` em ${n.agreed_installments}x` : ""}
-                      </span>
-                    )}
-                    {n.promised_payment_date && (
-                      <span className="mt-1 flex w-fit items-center gap-1 rounded-full bg-warn-soft px-2 py-0.5 text-[10px] font-medium text-warn">
-                        <CalendarClock size={10} />
-                        {formatDate(n.promised_payment_date)}
-                        {n.promised_payment_amount ? ` · ${formatBRL(Number(n.promised_payment_amount))}` : ""}
                       </span>
                     )}
                   </TD>
@@ -549,28 +503,6 @@ export default function NegociacaoPage() {
                 <option key={k} value={k}>{ARGUMENT_LABELS[k]}</option>
               ))}
             </Select>
-          </div>
-          <div className="grid grid-cols-1 gap-4 rounded-md border border-warn/25 bg-warn-soft/40 p-3 sm:grid-cols-2">
-            <div>
-              <Label htmlFor="n-promise-date">Promessa de pagamento (data)</Label>
-              <Input
-                id="n-promise-date"
-                type="date"
-                value={form.promised_payment_date}
-                onChange={(e) => setForm({ ...form, promised_payment_date: e.target.value })}
-              />
-            </div>
-            <div>
-              <Label htmlFor="n-promise-amount">Valor prometido (R$)</Label>
-              <Input
-                id="n-promise-amount"
-                className="font-mono"
-                inputMode="decimal"
-                placeholder="380,08"
-                value={form.promised_payment_amount}
-                onChange={(e) => setForm({ ...form, promised_payment_amount: e.target.value })}
-              />
-            </div>
           </div>
           <div>
             <Label htmlFor="n-notes">O que foi negociado</Label>

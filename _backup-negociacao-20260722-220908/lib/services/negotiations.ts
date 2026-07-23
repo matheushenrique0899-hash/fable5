@@ -26,8 +26,6 @@ export interface NegotiationInput {
   agreed_amount?: number | null;
   agreed_installments?: number | null;
   agreed_due?: string | null;
-  promised_payment_date?: string | null;
-  promised_payment_amount?: number | null;
 }
 
 export async function createNegotiation(input: NegotiationInput) {
@@ -58,8 +56,6 @@ export async function updateNegotiation(id: string, input: Partial<NegotiationIn
     agreed_amount: input.agreed_amount ?? null,
     agreed_installments: input.agreed_installments ?? null,
     agreed_due: input.agreed_due || null,
-    promised_payment_date: input.promised_payment_date || null,
-    promised_payment_amount: input.promised_payment_amount ?? null,
   }).eq("id", id);
   if (error) throw error;
 }
@@ -68,36 +64,6 @@ export async function deleteNegotiation(id: string) {
   const supabase = createClient();
   const { error } = await supabase.from("negotiations").delete().eq("id", id);
   if (error) throw error;
-}
-
-// Busca, em lote, o contato mais recente de cada negociação (para mostrar
-// a última nota direto na listagem, sem precisar abrir o histórico).
-// Mesmo padrão de listCharges: busca tudo em blocos de 200 ids e reduz no
-// cliente, em vez de depender de window function no banco.
-export async function listLastContacts(
-  negotiationIds: string[]
-): Promise<Map<string, NegotiationContact>> {
-  const map = new Map<string, NegotiationContact>();
-  const uniqueIds = Array.from(new Set(negotiationIds));
-  if (uniqueIds.length === 0) return map;
-
-  const supabase = createClient();
-  for (let i = 0; i < uniqueIds.length; i += 200) {
-    const chunk = uniqueIds.slice(i, i + 200);
-    const { data } = await supabase
-      .from("negotiation_contacts")
-      .select("*")
-      .in("negotiation_id", chunk);
-    (data ?? []).forEach((c: any) => {
-      const current = map.get(c.negotiation_id);
-      const isNewer =
-        !current ||
-        c.contact_date > current.contact_date ||
-        (c.contact_date === current.contact_date && c.created_at > current.created_at);
-      if (isNewer) map.set(c.negotiation_id, c as NegotiationContact);
-    });
-  }
-  return map;
 }
 
 // IDs dos clientes com negociação ativa (para o indicador na aba Cobranças)

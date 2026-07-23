@@ -74,8 +74,6 @@ export interface Negotiation {
   agreed_amount: number | null;
   agreed_installments: number | null;
   agreed_due: string | null;
-  promised_payment_date: string | null;
-  promised_payment_amount: number | null;
   created_at: string;
   updated_at: string;
   clients?: Pick<Client, "name" | "document"> | null;
