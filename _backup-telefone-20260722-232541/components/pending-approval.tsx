@@ -32,15 +32,7 @@ export function PendingApproval({ email }: { email: string }) {
           <p className="mt-0.5 font-mono text-fg">{email}</p>
         </div>
         <p className="mt-4 text-xs text-faint">
-          Se precisar agilizar, entre em contato com o administrador:{" "}
-          <a
-            href="https://wa.me/5518998098771"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="font-medium text-accent hover:underline"
-          >
-            (18) 99809-8771
-          </a>
+          Se precisar agilizar, entre em contato com o administrador.
         </p>
         <Button variant="secondary" className="mt-6" onClick={handleLogout}>
           <LogOut size={15} /> Sair
