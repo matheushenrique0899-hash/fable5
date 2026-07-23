@@ -305,19 +305,17 @@ export async function importNegotiations(
   const uniqueDocs = Array.from(new Set(withDoc.map((w) => w.docKey)));
   const docToClientId = new Map<string, string>();
   const docHasPhone = new Map<string, boolean>();
-  const docToStoredName = new Map<string, string>();
 
   for (let i = 0; i < uniqueDocs.length; i += 200) {
     const chunk = uniqueDocs.slice(i, i + 200);
     const { data: existing } = await supabase
       .from("clients")
-      .select("id, document, phone, name")
+      .select("id, document, phone")
       .eq("owner_id", user.id)
       .in("document", chunk);
     (existing ?? []).forEach((c) => {
       docToClientId.set(c.document, c.id);
       docHasPhone.set(c.document, !!c.phone);
-      docToStoredName.set(c.document, c.name);
     });
   }
 
@@ -347,25 +345,6 @@ export async function importNegotiations(
   for (const w of phoneUpdates) {
     await supabase.from("clients").update({ phone: w.row.phone }).eq("id", docToClientId.get(w.docKey)!);
     docHasPhone.set(w.docKey, true);
-  }
-
-  // Cliente já existia com o código, mas a planilha trouxe um nome diferente
-  // do que está salvo (ex.: correção de uma importação antiga que gravou o
-  // código no lugar do nome). A planilha mais recente é considerada a fonte
-  // da verdade, então o nome é atualizado — sem isso, um código já existente
-  // ficaria com o nome errado para sempre, mesmo reimportando corrigido.
-  const seenForNameUpdate = new Set<string>();
-  for (const w of withDoc) {
-    if (seenForNameUpdate.has(w.docKey)) continue;
-    seenForNameUpdate.add(w.docKey);
-    if (!docToClientId.has(w.docKey)) continue;
-    const storedName = docToStoredName.get(w.docKey);
-    if (storedName !== undefined && storedName.trim() !== w.row.name.trim()) {
-      await supabase
-        .from("clients")
-        .update({ name: w.row.name })
-        .eq("id", docToClientId.get(w.docKey)!);
-    }
   }
 
   // ---- Passo 2: inserir cobranças em lote ----
