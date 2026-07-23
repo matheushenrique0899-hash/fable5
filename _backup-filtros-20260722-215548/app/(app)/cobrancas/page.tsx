@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { usePersistedState, useEffectAfterMount } from "@/lib/use-persisted-state";
 import { useRouter } from "next/navigation";
 import { Receipt, Plus, CheckCircle2, Trash2, Pencil, Handshake, Upload, Download, MessageCircle, FileDown, Search, RotateCcw, ChevronRight } from "lucide-react";
 import {
@@ -77,13 +76,13 @@ export default function CobrancasPage() {
   const router = useRouter();
   const [charges, setCharges] = useState<Charge[]>([]);
   const [clients, setClients] = useState<{ id: string; name: string }[]>([]);
-  const [filter, setFilter] = usePersistedState<Filter>("cifra:cobrancas:filter", "todas");
-  const [agingFilter, setAgingFilter] = usePersistedState<AgingFilter>("cifra:cobrancas:agingFilter", "todas");
+  const [filter, setFilter] = useState<Filter>("todas");
+  const [agingFilter, setAgingFilter] = useState<AgingFilter>("todas");
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 20;
-  const [search, setSearch] = usePersistedState<string>("cifra:cobrancas:search", "");
-  const [sortBy, setSortBy] = usePersistedState<"oldest" | "newest" | "highest" | "lowest">("cifra:cobrancas:sortBy", "newest");
+  const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState<"oldest" | "newest" | "highest" | "lowest">("newest");
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Charge | null>(null);
@@ -118,7 +117,7 @@ export default function CobrancasPage() {
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
 
   // Reset página quando filtro ou busca muda
-  useEffectAfterMount(() => { setPage(1); }, [filter, agingFilter, search, sortBy]);
+  useEffect(() => { setPage(1); }, [filter, agingFilter, search, sortBy]);
 
   // Busca todas as cobranças uma única vez; a troca de aba (Todas/Pendentes/
   // Atrasadas/Pagas) filtra em memória, sem nova consulta ao Supabase.
