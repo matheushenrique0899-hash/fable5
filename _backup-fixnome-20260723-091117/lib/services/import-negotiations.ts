@@ -92,36 +92,18 @@ export function parseTable(text: string): ParsedTable {
 }
 
 // Adivinha, para cada campo do Cifra, qual coluna da planilha corresponde.
-//
-// IMPORTANTE: cada coluna só pode ser usada por UM campo. Cabeçalhos como
-// "Código Cliente" contêm "codigo" (bate com código) E "cliente" (bate com
-// nome) ao mesmo tempo — sem essa trava, os dois campos apontavam pra essa
-// mesma coluna, e o nome do cliente virava o próprio código (ex.: cliente
-// salvo com o nome "C00999" em vez do nome de verdade). Por isso os campos
-// são resolvidos em ordem de prioridade, e uma coluna já usada por um campo
-// sai da disputa para os campos seguintes.
 export function autoDetectMapping(headers: string[]): ImportMapping {
   const h = headers.map(normalize);
-  const used = new Set<number>();
-
-  function find(fn: (x: string) => boolean): number {
-    const idx = h.findIndex((x, i) => !used.has(i) && fn(x));
-    if (idx >= 0) used.add(idx);
-    return idx;
-  }
-
-  // Ordem importa: campos mais específicos primeiro, para reservar sua
-  // coluna antes que um campo mais "genérico" (como nome, que casa com
-  // várias palavras comuns) possa roubá-la.
-  const code = find((x) => x.startsWith("cod") || x === "code"); // cobre "codigo", "cod", "cod.", "cód. cliente" etc.
-  const due = find((x) => x.includes("vencimento") || x.includes("venc") || x === "due");
-  const sale = find((x) => x.includes("venda") || x === "sale" || x.includes("emissao"));
-  const total = find((x) => x.includes("total") || x.includes("receber") || x.includes("saldo") || x.includes("valor"));
-  const phone = find((x) => x.includes("telefone") || x.includes("fone") || x.includes("celular") || x === "phone" || x.includes("whats"));
-  const obs = find((x) => x.includes("observacao") || x.includes("obs") || x === "observation");
-  const name = find((x) => x.includes("nome") || x === "name" || x.includes("cliente"));
-
-  return { code, name, total, sale, due, phone, obs };
+  const find = (fn: (x: string) => boolean) => h.findIndex(fn);
+  return {
+    code:  find((x) => x.includes("codigo") || x === "code" || x === "cod"),
+    name:  find((x) => x.includes("nome") || x === "name" || x.includes("cliente")),
+    total: find((x) => x.includes("total") || x.includes("receber") || x.includes("saldo") || x.includes("valor")),
+    sale:  find((x) => x.includes("venda") || x === "sale" || x.includes("emissao")),
+    due:   find((x) => x.includes("vencimento") || x.includes("venc") || x === "due"),
+    phone: find((x) => x.includes("telefone") || x.includes("fone") || x.includes("celular") || x === "phone" || x.includes("whats")),
+    obs:   find((x) => x.includes("observacao") || x.includes("obs") || x === "observation"),
+  };
 }
 
 // Campos obrigatórios que ainda não foram mapeados (para bloquear o avanço)
