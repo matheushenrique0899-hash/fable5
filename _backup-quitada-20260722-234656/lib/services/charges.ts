@@ -70,31 +70,6 @@ export async function getClientDebtSummary(
   return { totalDebt, totalPaid };
 }
 
-// Dívida em aberto de VÁRIOS clientes de uma vez (para a listagem de
-// negociações mostrar "Dívida quitada" sem consultar cliente por cliente).
-// Cliente ausente do mapa = sem cobrança em aberto = dívida quitada.
-export async function getClientsOpenDebt(
-  clientIds: string[]
-): Promise<Map<string, number>> {
-  const map = new Map<string, number>();
-  const uniqueIds = Array.from(new Set(clientIds));
-  if (uniqueIds.length === 0) return map;
-
-  const supabase = createClient();
-  for (let i = 0; i < uniqueIds.length; i += 200) {
-    const chunk = uniqueIds.slice(i, i + 200);
-    const { data } = await supabase
-      .from("charges")
-      .select("client_id, amount")
-      .in("client_id", chunk)
-      .neq("status", "pago");
-    (data ?? []).forEach((c: any) => {
-      map.set(c.client_id, (map.get(c.client_id) ?? 0) + Number(c.amount));
-    });
-  }
-  return map;
-}
-
 export async function createCharge(input: {
   client_id: string;
   amount: number;

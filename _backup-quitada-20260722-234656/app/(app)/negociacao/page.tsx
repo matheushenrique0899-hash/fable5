@@ -15,7 +15,7 @@ import {
   applyAgreementToCharges,
   listLastContacts,
 } from "@/lib/services/negotiations";
-import { refreshOverdue, getClientDebtSummary, getClientsOpenDebt } from "@/lib/services/charges";
+import { refreshOverdue, getClientDebtSummary } from "@/lib/services/charges";
 import { listAllClientsLite } from "@/lib/services/clients";
 import type { Negotiation, NegotiationStatus, NegotiationContact, AgreementInstallment, NegotiationArgument } from "@/lib/types";
 import { NEGOTIATION_LABELS, ARGUMENT_LABELS } from "@/lib/types";
@@ -85,7 +85,6 @@ const emptyForm = {
 export default function NegociacaoPage() {
   const [all, setAll] = useState<Negotiation[]>([]);
   const [lastContacts, setLastContacts] = useState<Map<string, NegotiationContact>>(new Map());
-  const [openDebtByClient, setOpenDebtByClient] = useState<Map<string, number>>(new Map());
   const [clients, setClients] = useState<{ id: string; name: string }[]>([]);
   const [filter, setFilter] = useState<Filter>("todas");
   const [loading, setLoading] = useState(true);
@@ -117,7 +116,6 @@ export default function NegociacaoPage() {
       const negotiations = await listNegotiations("todas");
       setAll(negotiations);
       listLastContacts(negotiations.map((n) => n.id)).then(setLastContacts);
-      getClientsOpenDebt(negotiations.map((n) => n.client_id)).then(setOpenDebtByClient);
     } finally {
       setLoading(false);
     }
@@ -431,12 +429,6 @@ export default function NegociacaoPage() {
                         <CalendarClock size={10} />
                         {formatDate(n.promised_payment_date)}
                         {n.promised_payment_amount ? ` · ${formatBRL(Number(n.promised_payment_amount))}` : ""}
-                      </span>
-                    )}
-                    {(openDebtByClient.get(n.client_id) ?? 0) <= 0 && (
-                      <span className="mt-1 flex w-fit items-center gap-1 rounded-full bg-accent-soft px-2 py-0.5 text-[10px] font-medium text-accent">
-                        <CheckCircle2 size={10} />
-                        Dívida quitada
                       </span>
                     )}
                   </TD>
