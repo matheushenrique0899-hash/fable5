@@ -195,31 +195,6 @@ export default function NegociacaoPage() {
           // Reflete o acordo como observação nas cobranças do cliente
           await applyAgreementToCharges(editing.client_id, agreedAmount, agreedInst, agreedDue);
         }
-
-        // Registra automaticamente no histórico de contatos quando a promessa
-        // de pagamento ou "o que foi negociado" mudou — assim a linha da
-        // listagem já mostra a nota mais recente, sem o funcionário precisar
-        // preencher a mesma informação duas vezes (form + histórico).
-        const noteChanged = form.notes.trim() !== (editing.notes ?? "");
-        const promiseChanged =
-          promisedDate !== (editing.promised_payment_date ?? null) ||
-          promisedAmount !== (editing.promised_payment_amount ?? null);
-
-        if (noteChanged || promiseChanged) {
-          const parts: string[] = [];
-          if (promisedDate) {
-            parts.push(
-              `Promessa de pagamento: ${formatDate(promisedDate)}${
-                promisedAmount ? ` · ${formatBRL(promisedAmount)}` : ""
-              }`
-            );
-          }
-          if (form.notes.trim()) parts.push(form.notes.trim());
-          if (parts.length > 0) {
-            const contactDate = form.last_contact || new Date().toISOString().slice(0, 10);
-            await addContact(editing, contactDate, parts.join(" — "));
-          }
-        }
       }
       setDialogOpen(false);
       await load();
