@@ -6,8 +6,8 @@ export interface ImportNegRow {
   code: string;
   name: string;
   total: number;
-  sale_date: string;      // YYYY-MM-DD (data da venda)
-  newest_due: string;     // YYYY-MM-DD (vencimento)
+  sale_date: string;      // YYYY-MM-DD (data da venda mais recente)
+  newest_due: string;     // YYYY-MM-DD (vencimento mais recente)
   phone: string | null;
   observation: string | null;
   isDuplicate?: boolean;  // marcado no preview se já existe no banco
@@ -24,7 +24,6 @@ function normalize(s: string): string {
   return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
 }
 
-// Lê o arquivo tentando UTF-8 e caindo para Windows-1252 (Excel BR antigo)
 export async function readCsvFile(file: File): Promise<string> {
   const buffer = await file.arrayBuffer();
   const utf8Text = new TextDecoder("utf-8").decode(buffer);
@@ -42,120 +41,66 @@ function parseDate(raw: string | undefined): Date | null {
   return isNaN(d.getTime()) ? null : d;
 }
 
-// ============================================================
-// DE-PARA (mapeamento de colunas) — o que resolve a dor de
-// "minha planilha não é igual ao modelo".
-// ============================================================
-
-export type ImportField = "code" | "name" | "total" | "sale" | "due" | "phone" | "obs";
-
-export const IMPORT_FIELDS: {
-  key: ImportField;
-  label: string;
-  required: boolean;
-  hint: string;
-}[] = [
-  { key: "code",  label: "Código",        required: true,  hint: "chave do cliente" },
-  { key: "name",  label: "Nome",          required: true,  hint: "" },
-  { key: "total", label: "Total",         required: true,  hint: "valor da cobrança" },
-  { key: "sale",  label: "Data da Venda", required: true,  hint: "" },
-  { key: "due",   label: "Vencimento",    required: true,  hint: "" },
-  { key: "phone", label: "Telefone",      required: false, hint: "opcional" },
-  { key: "obs",   label: "Observação",    required: false, hint: "opcional" },
-];
-
-// -1 = coluna não encontrada (o usuário escolhe no de-para)
-export type ImportMapping = Record<ImportField, number>;
-
-function detectSep(firstLine: string): string {
-  if (firstLine.includes("\t")) return "\t"; // colado direto do Excel
-  if (firstLine.includes(";")) return ";";
-  return ",";
-}
-
-export interface ParsedTable {
-  headers: string[];
-  rows: string[][];
-  sep: string;
-}
-
-// Divide o texto (CSV ou colado do Excel) em cabeçalho + linhas.
-export function parseTable(text: string): ParsedTable {
-  const lines = text
-    .split(/\r?\n/)
-    .map((l) => l.replace(/\s+$/, ""))
-    .filter((l) => l.trim() !== "");
-  if (lines.length === 0) return { headers: [], rows: [], sep: "," };
-  const sep = detectSep(lines[0]);
-  const cut = (l: string) => l.split(sep).map((c) => c.replace(/^"|"$/g, "").trim());
-  return { headers: cut(lines[0]), rows: lines.slice(1).map(cut), sep };
-}
-
-// Adivinha, para cada campo do Cifra, qual coluna da planilha corresponde.
-export function autoDetectMapping(headers: string[]): ImportMapping {
-  const h = headers.map(normalize);
-  const find = (fn: (x: string) => boolean) => h.findIndex(fn);
-  return {
-    code:  find((x) => x.includes("codigo") || x === "code" || x === "cod"),
-    name:  find((x) => x.includes("nome") || x === "name" || x.includes("cliente")),
-    total: find((x) => x.includes("total") || x.includes("receber") || x.includes("saldo") || x.includes("valor")),
-    sale:  find((x) => x.includes("venda") || x === "sale" || x.includes("emissao")),
-    due:   find((x) => x.includes("vencimento") || x.includes("venc") || x === "due"),
-    phone: find((x) => x.includes("telefone") || x.includes("fone") || x.includes("celular") || x === "phone" || x.includes("whats")),
-    obs:   find((x) => x.includes("observacao") || x.includes("obs") || x === "observation"),
-  };
-}
-
-// Campos obrigatórios que ainda não foram mapeados (para bloquear o avanço)
-export function missingRequired(mapping: ImportMapping): string[] {
-  return IMPORT_FIELDS.filter((f) => f.required && mapping[f.key] < 0).map((f) => f.label);
-}
-
-export interface BuildResult {
+// CSV: Código, Nome, Total, Data da Venda, Vencimento, Telefone, Observação
+// Cada linha vira uma cobrança separada. Só agrupa (soma) linhas que são
+// EXATAMENTE a mesma venda (mesmo código + mesma data de venda + mesmo
+// vencimento) — isso evita contar duas vezes uma linha repetida na
+// planilha, sem juntar vendas diferentes do mesmo cliente numa só.
+export function parseNegotiationsCSV(text: string): {
   rows: ImportNegRow[];
   errors: string[];
-  stats: { lines: number; charges: number; clients: number };
-}
-
-// Constrói as cobranças a partir das linhas + do mapeamento escolhido.
-// Cada linha = uma cobrança. Só soma linhas que são EXATAMENTE a mesma venda
-// (mesmo código + mesma data de venda + mesmo vencimento), evitando contar
-// duas vezes uma linha repetida — sem juntar vendas diferentes do mesmo
-// cliente. Mesmo código com datas diferentes = cobranças separadas na
-// carteira daquele cliente (é o comportamento de "somar por código").
-export function buildImportRows(rows: string[][], mapping: ImportMapping): BuildResult {
+} {
+  const sep = text.includes(";") ? ";" : ",";
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const errors: string[] = [];
-  let lines = 0;
+  if (lines.length < 2) return { rows: [], errors: ["Arquivo vazio."] };
+
+  const header = lines[0].split(sep).map((h) => normalize(h.replace(/^"|"$/g, "")));
+  const iCode = header.findIndex((h) => h.includes("codigo") || h === "code");
+  const iName = header.findIndex((h) => h.includes("nome") || h === "name");
+  const iTotal = header.findIndex((h) => h.includes("total") || h.includes("receber") || h.includes("saldo"));
+  const iSale = header.findIndex((h) => h.includes("venda") || h === "sale");
+  const iDue = header.findIndex((h) => h.includes("vencimento") || h.includes("venc") || h === "due");
+  const iPhone = header.findIndex((h) => h.includes("telefone") || h.includes("fone") || h.includes("celular") || h === "phone");
+  const iObs = header.findIndex((h) => h.includes("observacao") || h.includes("obs") || h === "observation");
+
+  if (iCode === -1 || iName === -1 || iTotal === -1 || iSale === -1 || iDue === -1) {
+    errors.push(
+      `Cabeçalho não reconhecido (${header.join(", ")}). Esperado: Código, Nome, Total, Data da Venda, Vencimento`
+    );
+    return { rows: [], errors };
+  }
+
   const map = new Map<string, {
     code: string; name: string; total: number; sale: Date; due: Date;
     phone: string | null; observation: string | null;
   }>();
 
-  rows.forEach((cols, i) => {
-    const ln = i + 2; // +2: linha 1 é cabeçalho, humano conta a partir de 1
-    if (cols.every((c) => c === "")) return; // linha totalmente em branco: ignora
-    const get = (f: ImportField) => (mapping[f] >= 0 ? (cols[mapping[f]] ?? "").trim() : "");
+  lines.slice(1).forEach((line, i) => {
+    const cols = line.split(sep).map((c) => c.replace(/^"|"$/g, "").trim());
+    const code = cols[iCode]?.trim();
+    const name = cols[iName]?.trim();
+    const rawTotal = cols[iTotal]?.replace(/[R$\s.]/g, "").replace(",", ".").trim();
 
-    const code = get("code");
-    const name = get("name");
-    if (!code) { errors.push(`Linha ${ln}: código vazio`); lines++; return; }
-    if (!name) { errors.push(`Linha ${ln}: nome vazio`); lines++; return; }
+    if (!code || !name) { errors.push(`Linha ${i + 2}: código ou nome vazio`); return; }
 
-    const rawTotal = get("total").replace(/[R$\s.]/g, "").replace(",", ".");
-    const total = parseFloat(rawTotal);
-    if (isNaN(total) || total < 0) { errors.push(`Linha ${ln}: valor inválido (${get("total")})`); lines++; return; }
+    // Aceita valor 0 (>= 0)
+    const total = parseFloat(rawTotal ?? "");
+    if (isNaN(total) || total < 0) { errors.push(`Linha ${i + 2}: valor inválido (${cols[iTotal]})`); return; }
 
-    const sale = parseDate(get("sale"));
-    const due = parseDate(get("due"));
-    if (!due) { errors.push(`Linha ${ln}: vencimento inválido (${get("due")})`); lines++; return; }
-    if (!sale) { errors.push(`Linha ${ln}: data da venda inválida (${get("sale")})`); lines++; return; }
+    const sale = parseDate(cols[iSale]);
+    const due = parseDate(cols[iDue]);
+    if (!due) { errors.push(`Linha ${i + 2}: vencimento inválido (${cols[iDue]})`); return; }
+    if (!sale) { errors.push(`Linha ${i + 2}: data da venda inválida (${cols[iSale]})`); return; }
 
-    const rawPhone = get("phone").replace(/\D/g, "");
+    const rawPhone = iPhone !== -1 ? (cols[iPhone] ?? "").replace(/\D/g, "") : "";
     const phone = rawPhone.length >= 10 ? rawPhone : null;
-    const obs = get("obs") || null;
+    const obs = iObs !== -1 ? (cols[iObs] ?? "").trim() || null : null;
 
-    lines++;
+    // Chave = mesma venda de verdade (código + data da venda + vencimento).
+    // Datas diferentes = cobranças diferentes, mesmo com o mesmo código.
     const key = `${code}|${sale.toISOString().slice(0, 10)}|${due.toISOString().slice(0, 10)}`;
+
     const existing = map.get(key);
     if (existing) {
       existing.total += total;
@@ -166,7 +111,7 @@ export function buildImportRows(rows: string[][], mapping: ImportMapping): Build
     }
   });
 
-  const out: ImportNegRow[] = Array.from(map.values()).map((v) => ({
+  const rows: ImportNegRow[] = Array.from(map.values()).map((v) => ({
     code: v.code,
     name: v.name,
     total: Math.round(v.total * 100) / 100,
@@ -176,31 +121,7 @@ export function buildImportRows(rows: string[][], mapping: ImportMapping): Build
     observation: v.observation,
   }));
 
-  const clients = new Set(out.map((r) => r.code)).size;
-  return { rows: out, errors, stats: { lines, charges: out.length, clients } };
-}
-
-// Compatibilidade: mantém a assinatura antiga (detecta cabeçalho e constrói
-// direto). Usada por quem chama parseNegotiationsCSV(text).
-export function parseNegotiationsCSV(text: string): {
-  rows: ImportNegRow[];
-  errors: string[];
-} {
-  const { headers, rows } = parseTable(text);
-  if (headers.length === 0) return { rows: [], errors: ["Arquivo vazio."] };
-  const mapping = autoDetectMapping(headers);
-  const missing = missingRequired(mapping);
-  if (missing.length > 0) {
-    return {
-      rows: [],
-      errors: [
-        `Não reconheci as colunas: ${missing.join(", ")}. ` +
-        `Cabeçalho encontrado: ${headers.join(", ")}. Use o de-para para apontar as colunas.`,
-      ],
-    };
-  }
-  const { rows: built, errors } = buildImportRows(rows, mapping);
-  return { rows: built, errors };
+  return { rows, errors };
 }
 
 // Verifica quais linhas já existem no banco.
@@ -211,6 +132,7 @@ export async function checkDuplicates(rows: ImportNegRow[]): Promise<ImportNegRo
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return rows;
 
+  // Busca cobranças importadas com os campos que compõem a chave
   const existing = await fetchAllRows<{ amount: number; due_date: string; sale_date: string | null; clients: { name: string }[] | { name: string } | null }>(
     (from, to) =>
       supabase
@@ -221,6 +143,7 @@ export async function checkDuplicates(rows: ImportNegRow[]): Promise<ImportNegRo
         .range(from, to)
   );
 
+  // Chave normalizada: nome|valor|venda|vencimento
   const keyOf = (name: string, amount: number, sale: string | null, due: string) =>
     `${normalize(name)}|${amount.toFixed(2)}|${sale ?? ""}|${due}`;
 
@@ -257,6 +180,7 @@ export async function importNegotiations(
   const errors: string[] = [];
   let skipped = 0;
 
+  // Limite de segurança: máximo de cobranças por conta
   const CHARGE_LIMIT = 50000;
   const { count: currentCount } = await supabase
     .from("charges")
@@ -269,6 +193,7 @@ export async function importNegotiations(
     );
   }
 
+  // Cria o lote
   const { data: batch, error: be } = await supabase
     .from("import_batches")
     .insert({
@@ -282,12 +207,21 @@ export async function importNegotiations(
   if (be) throw be;
   const batchId = batch.id;
 
-  // ---- Passo 1: resolver clientes (identidade = CÓDIGO) ----
-  const withDoc = toImport.map((r) => ({ row: r, docKey: r.code.trim() }));
+  // ---- Passo 1: resolver clientes ----
+  // Identidade do cliente = CÓDIGO (não o nome). Mesmo código = mesmo
+  // cliente; código diferente = cliente diferente, mesmo que o nome seja
+  // igual (pode ser coincidência de nome — duas pessoas diferentes).
+  const withDoc = toImport.map((r) => ({
+    row: r,
+    docKey: r.code.trim(),
+  }));
+
+  // Busca TODOS os clientes já existentes desses códigos numa query só
   const uniqueDocs = Array.from(new Set(withDoc.map((w) => w.docKey)));
   const docToClientId = new Map<string, string>();
   const docHasPhone = new Map<string, boolean>();
 
+  // Busca em blocos de 200 códigos (limite de URL do .in())
   for (let i = 0; i < uniqueDocs.length; i += 200) {
     const chunk = uniqueDocs.slice(i, i + 200);
     const { data: existing } = await supabase
@@ -301,11 +235,17 @@ export async function importNegotiations(
     });
   }
 
+  // Cria os clientes que ainda não existem, em lote
   const newClientDocs = uniqueDocs.filter((d) => !docToClientId.has(d));
   if (newClientDocs.length > 0) {
     const newClientsPayload = newClientDocs.map((doc) => {
       const w = withDoc.find((x) => x.docKey === doc)!;
-      return { owner_id: user.id, name: w.row.name, document: doc, phone: w.row.phone };
+      return {
+        owner_id: user.id,
+        name: w.row.name,
+        document: doc,
+        phone: w.row.phone,
+      };
     });
     for (let i = 0; i < newClientsPayload.length; i += 500) {
       const chunk = newClientsPayload.slice(i, i + 500);
@@ -321,6 +261,7 @@ export async function importNegotiations(
     }
   }
 
+  // Completa telefone de clientes que existiam sem telefone
   const phoneUpdates = withDoc.filter(
     (w) => docToClientId.has(w.docKey) && docHasPhone.get(w.docKey) === false && w.row.phone
   );
@@ -382,13 +323,16 @@ export async function listImportBatches(): Promise<ImportBatch[]> {
   return (data ?? []) as ImportBatch[];
 }
 
+// Exclui um lote inteiro e todas as cobranças dele
 export async function deleteImportBatch(batchId: string): Promise<number> {
   const supabase = createClient();
+  // Conta antes de apagar
   const { count } = await supabase
     .from("charges")
     .select("id", { count: "exact", head: true })
     .eq("import_batch_id", batchId);
 
+  // Apaga as cobranças do lote (as negociações ligadas ao cliente permanecem)
   const { error: ce } = await supabase.from("charges").delete().eq("import_batch_id", batchId);
   if (ce) throw ce;
 

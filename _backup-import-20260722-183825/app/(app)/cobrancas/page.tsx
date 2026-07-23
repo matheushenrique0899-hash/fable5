@@ -29,7 +29,6 @@ import {
   type ImportNegRow,
   type ImportNegResult,
 } from "@/lib/services/import-negotiations";
-import { ImportCarteiraDialog } from "@/components/import-carteira-dialog";
 import type { ImportBatch } from "@/lib/types";
 import type { Charge, ChargeStatus } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -580,7 +579,7 @@ return () => clearTimeout(t);
           </Button>
           <Button
             variant="secondary"
-            onClick={() => setImportOpen(true)}
+            onClick={() => { resetImport(); setImportOpen(true); }}
           >
             <Upload size={15} /> Importar planilha
           </Button>
@@ -883,12 +882,207 @@ return () => clearTimeout(t);
         </div>
       )}
 
-      {/* Importar carteira — assistente com de-para e validação */}
-      <ImportCarteiraDialog
+      {/* Importar planilha do ERP (com preview + lotes) */}
+      <Dialog
         open={importOpen}
         onClose={() => setImportOpen(false)}
-        onImported={load}
-      />
+        title="Importar carteira de cobrança"
+        className="max-w-3xl"
+      >
+        <div className="space-y-4">
+          {!preview && !importResult && (
+            <>
+              <p className="text-sm text-muted">
+                Exporte do ERP, ajuste os cabeçalhos para{" "}
+                <span className="font-mono text-xs text-fg">Código; Nome; Total; Data da Venda; Vencimento; Telefone; Observação</span>{" "}
+                e salve como CSV. Telefone e Observação são opcionais. O sistema agrupa por
+                código, soma o saldo e usa a data mais recente.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="secondary" size="sm" onClick={downloadNegTemplate}>
+                  <Download size={14} /> Baixar modelo
+                </Button>
+                <label className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-md bg-accent px-3 text-xs font-semibold text-white transition-colors hover:bg-accent-hover">
+                  <Upload size={14} />
+                  Escolher arquivo CSV
+                  <input
+                    type="file"
+                    accept=".csv,text/csv"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) handleImportFile(f);
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+              </div>
+
+              {/* Histórico de lotes */}
+              {batches.length > 0 && (
+                <div className="mt-2 border-t border-border pt-4">
+                  <p className="mb-2 text-xs font-medium uppercase tracking-wide text-faint">
+                    Importações anteriores
+                  </p>
+                  <div className="max-h-48 space-y-1.5 overflow-y-auto">
+                    {batches.map((b) => (
+                      <div
+                        key={b.id}
+                        className="flex items-center justify-between rounded-md border border-border bg-bg px-3 py-2 text-sm"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate font-medium text-fg">
+                            {b.file_name || "Importação"}
+                          </p>
+                          <p className="text-xs text-faint">
+                            {formatDate(b.created_at)} · {b.row_count} cobranças ·{" "}
+                            <span className="font-mono">{formatBRL(Number(b.total_amount))}</span>
+                          </p>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="shrink-0 hover:bg-danger-soft hover:text-danger"
+                          disabled={deletingBatch === b.id}
+                          onClick={() => handleDeleteBatch(b.id)}
+                        >
+                          {deletingBatch === b.id ? "Excluindo..." : <><Trash2 size={13} /> Excluir</>}
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-2 text-xs text-faint">
+                    Excluir uma importação remove todas as cobranças dela.
+                  </p>
+                </div>
+              )}
+            </>
+          )}
+
+          {importError && (
+            <p className="rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-sm text-danger">
+              {importError}
+            </p>
+          )}
+
+          {/* PREVIEW */}
+          {preview && (() => {
+            const dupCount = preview.filter((r) => r.isDuplicate).length;
+            const willImport = skipDuplicates ? preview.filter((r) => !r.isDuplicate).length : preview.length;
+            return (
+              <>
+                <div className="flex items-baseline justify-between">
+                  <p className="text-sm font-medium text-fg">
+                    Prévia: {preview.length} {preview.length === 1 ? "cliente" : "clientes"}
+                  </p>
+                  <p className="font-mono text-sm text-accent">
+                    {formatBRL(preview.reduce((s, r) => s + r.total, 0))}
+                  </p>
+                </div>
+
+                {dupCount > 0 && (
+                  <div className="rounded-md border border-warn/30 bg-warn-soft px-3 py-2.5 text-sm">
+                    <p className="font-medium text-warn">
+                      {dupCount} {dupCount === 1 ? "cobrança idêntica já existe" : "cobranças idênticas já existem"} (mesmo nome, valor, venda e vencimento).
+                    </p>
+                    <label className="mt-2 flex cursor-pointer items-center gap-2 text-xs text-fg">
+                      <input
+                        type="checkbox"
+                        checked={skipDuplicates}
+                        onChange={(e) => setSkipDuplicates(e.target.checked)}
+                        className="h-3.5 w-3.5 accent-[#159A63]"
+                      />
+                      Pular as duplicadas (recomendado) — importar apenas {willImport} nova(s)
+                    </label>
+                  </div>
+                )}
+
+                <div className="max-h-64 overflow-y-auto rounded-md border border-border">
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 border-b border-border bg-surface">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-medium uppercase tracking-wide text-faint">Cód.</th>
+                        <th className="px-3 py-2 text-left font-medium uppercase tracking-wide text-faint">Nome</th>
+                        <th className="px-3 py-2 text-right font-medium uppercase tracking-wide text-faint">Total</th>
+                        <th className="px-3 py-2 text-left font-medium uppercase tracking-wide text-faint">Venc.</th>
+                        <th className="px-3 py-2 text-left font-medium uppercase tracking-wide text-faint"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/60">
+                      {preview.map((r) => (
+                        <tr key={r.code} className={r.isDuplicate ? "opacity-50" : ""}>
+                          <td className="px-3 py-2 font-mono text-muted">{r.code}</td>
+                          <td className="px-3 py-2 text-fg">{r.name}</td>
+                          <td className="px-3 py-2 text-right font-mono text-fg">{formatBRL(r.total)}</td>
+                          <td className="px-3 py-2 font-mono text-muted">{formatDate(r.newest_due)}</td>
+                          <td className="px-3 py-2">
+                            {r.isDuplicate && (
+                              <span className="rounded-full bg-warn-soft px-2 py-0.5 text-[10px] font-medium text-warn">
+                                já existe
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {previewErrors.length > 0 && (
+                  <p className="text-xs text-warn">
+                    {previewErrors.length} linha(s) serão ignoradas — ex.: {previewErrors[0]}
+                  </p>
+                )}
+                {importing && progress && progress.total > 0 && (
+                  <div className="space-y-1">
+                    <div className="h-2 overflow-hidden rounded-full bg-raised">
+                      <div
+                        className="h-full rounded-full bg-accent transition-all"
+                        style={{ width: `${Math.round((progress.done / progress.total) * 100)}%` }}
+                      />
+                    </div>
+                    <p className="text-center text-xs text-faint">
+                      {Math.round((progress.done / progress.total) * 100)}% concluído
+                    </p>
+                  </div>
+                )}
+                <div className="flex justify-end gap-2 pt-1">
+                  <Button variant="secondary" onClick={resetImport} disabled={importing}>Escolher outro arquivo</Button>
+                  <Button onClick={confirmImport} disabled={importing || willImport === 0}>
+                    {importing
+                      ? progress && progress.total > 0
+                        ? `Importando ${progress.done} de ${progress.total}...`
+                        : "Preparando..."
+                      : `Confirmar importação (${willImport})`}
+                  </Button>
+                </div>
+              </>
+            );
+          })()}
+
+          {/* RESULTADO */}
+          {importResult && (
+            <>
+              <div className="space-y-1.5 rounded-md border border-border bg-bg px-3 py-2.5 text-sm">
+                <p className="text-accent">
+                  {importResult.created} {importResult.created === 1 ? "cobrança criada" : "cobranças criadas"}
+                </p>
+                {importResult.skipped > 0 && (
+                  <p className="text-warn">{importResult.skipped} ignorada(s) por erro</p>
+                )}
+                {importResult.errors.slice(0, 3).map((e, i) => (
+                  <p key={i} className="font-mono text-xs text-danger">{e}</p>
+                ))}
+                {importResult.errors.length > 3 && (
+                  <p className="text-xs text-faint">+{importResult.errors.length - 3} outros erros</p>
+                )}
+              </div>
+              <div className="flex justify-end pt-1">
+                <Button variant="secondary" onClick={() => setImportOpen(false)}>Fechar</Button>
+              </div>
+            </>
+          )}
+        </div>
+      </Dialog>
 
       <Dialog
         open={dialogOpen}
