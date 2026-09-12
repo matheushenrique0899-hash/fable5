@@ -371,27 +371,35 @@ return () => clearTimeout(t);
         {c.status !== "pago" && (
           <>
             {c.clients?.phone && (
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="Cobrar no WhatsApp"
-                title="Cobrar no WhatsApp"
-                className="hover:bg-accent-soft hover:text-accent"
-                onClick={async () => {
-                  const name = c.clients?.name ?? "cliente";
-                  const balance = Number(c.amount) - (c.paid_total ?? 0);
-                  const message = `Olá ${name}! Consta em aberto o valor de ${formatBRL(balance)} com vencimento em ${formatDate(c.due_date)}. Podemos conversar sobre a regularização?`;
-                  const note = `WhatsApp aberto — cobrança de ${formatBRL(balance)}, vencimento ${formatDate(c.due_date)}.`;
-                  try {
-                    await logWhatsAppContact(c.client_id, note);
-                  } catch {
-                    // O WhatsApp ainda pode ser aberto mesmo se o registro falhar.
-                  }
-                  window.open(`https://wa.me/55${c.clients!.phone}?text=${encodeURIComponent(message)}`, "_blank", "noopener,noreferrer");
+              <a
+                href={`https://wa.me/55${c.clients.phone}?text=${encodeURIComponent(
+                  `Olá ${c.clients?.name ?? ""}! Consta em aberto o valor de ${formatBRL(
+                    Number(c.amount) - (c.paid_total ?? 0)
+                  )} com vencimento em ${formatDate(c.due_date)}. Podemos conversar sobre a regularização?`
+                )}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => {
+                  const amount = Number(c.amount) - (c.paid_total ?? 0);
+                  const now = new Date();
+                  const date = now.toLocaleDateString("pt-BR");
+                  const time = now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+                  void logWhatsAppContact(
+                    c.client_id,
+                    `WhatsApp aberto pelo operador em ${date} às ${time}. Cobrança de ${formatBRL(amount)}, vencimento ${formatDate(c.due_date)}.`
+                  );
                 }}
               >
-                <MessageCircle size={14} />
-              </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Cobrar no WhatsApp"
+                  title="Cobrar no WhatsApp"
+                  className="hover:bg-accent-soft hover:text-accent"
+                >
+                  <MessageCircle size={14} />
+                </Button>
+              </a>
             )}
             <Button
               variant="ghost"

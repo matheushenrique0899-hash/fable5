@@ -152,18 +152,14 @@ export async function addContact(
   }
 }
 
-// Registra que o operador abriu o WhatsApp para cobrar o cliente.
-// Não envia mensagem pela API: apenas cria um evento no histórico da negociação.
-export async function logWhatsAppContact(
-  clientId: string,
-  note: string,
-  contactDate = new Date().toISOString().slice(0, 10)
-): Promise<void> {
+// Registra que o operador abriu uma cobrança no WhatsApp.
+// Se o cliente ainda não tiver uma negociação ativa, cria uma automaticamente.
+export async function logWhatsAppContact(clientId: string, note: string): Promise<void> {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Sessão expirada. Faça login novamente.");
 
-  let { data: negotiation, error } = await supabase
+  let { data: negotiation, error: negotiationError } = await supabase
     .from("negotiations")
     .select("id, first_contact, last_contact")
     .eq("owner_id", user.id)
@@ -173,19 +169,41 @@ export async function logWhatsAppContact(
     .limit(1)
     .maybeSingle();
 
-  if (error) throw error;
+  if (negotiationError) throw negotiationError;
 
   if (!negotiation) {
     const { data: created, error: createError } = await supabase
       .from("negotiations")
-      .insert({ owner_id: user.id, client_id: clientId, status: "em_negociacao" })
+      .insert({
+        owner_id: user.id,
+        client_id: clientId,
+        status: "em_negociacao",
+      })
       .select("id, first_contact, last_contact")
       .single();
     if (createError) throw createError;
     negotiation = created;
   }
 
-  await addContact(negotiation as Pick<Negotiation, "id" | "first_contact" | "last_contact">, contactDate, note);
+  const today = new Date().toISOString().slice(0, 10);
+  const { error: contactError } = await supabase.from("negotiation_contacts").insert({
+    owner_id: user.id,
+    negotiation_id: negotiation.id,
+    contact_date: today,
+    note: note.trim(),
+  });
+  if (contactError) throw contactError;
+
+  const updates: Record<string, string> = {};
+  if (!negotiation.first_contact || today < negotiation.first_contact) updates.first_contact = today;
+  if (!negotiation.last_contact || today > negotiation.last_contact) updates.last_contact = today;
+  if (Object.keys(updates).length > 0) {
+    const { error: updateError } = await supabase
+      .from("negotiations")
+      .update(updates)
+      .eq("id", negotiation.id);
+    if (updateError) throw updateError;
+  }
 }
 
 export async function deleteContact(id: string) {
