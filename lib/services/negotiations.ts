@@ -152,6 +152,71 @@ export async function addContact(
   }
 }
 
+// Registra automaticamente quando o operador abre o WhatsApp pela cobrança.
+// Se o cliente ainda não tiver uma negociação ativa, cria uma para que o
+// contato não seja perdido no histórico. Não envia mensagem via API.
+export async function logWhatsAppContact(
+  clientId: string,
+  note: string
+): Promise<void> {
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Sessão expirada. Faça login novamente.");
+
+  const { data: existing, error: selectError } = await supabase
+    .from("negotiations")
+    .select("id, first_contact, last_contact")
+    .eq("owner_id", user.id)
+    .eq("client_id", clientId)
+    .in("status", ["em_negociacao", "aguardando_retorno"])
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (selectError) throw selectError;
+
+  let negotiation = existing;
+  if (!negotiation) {
+    const { data, error } = await supabase
+      .from("negotiations")
+      .insert({
+        owner_id: user.id,
+        client_id: clientId,
+        status: "em_negociacao",
+      })
+      .select("id, first_contact, last_contact")
+      .single();
+    if (error) throw error;
+    negotiation = data;
+  }
+
+  const contactDate = new Date().toISOString().slice(0, 10);
+  const { error: contactError } = await supabase
+    .from("negotiation_contacts")
+    .insert({
+      owner_id: user.id,
+      negotiation_id: negotiation.id,
+      contact_date: contactDate,
+      note: note.trim(),
+    });
+  if (contactError) throw contactError;
+
+  const updates: Record<string, string> = {};
+  if (!negotiation.first_contact || contactDate < negotiation.first_contact)
+    updates.first_contact = contactDate;
+  if (!negotiation.last_contact || contactDate > negotiation.last_contact)
+    updates.last_contact = contactDate;
+
+  if (Object.keys(updates).length > 0) {
+    const { error: updateError } = await supabase
+      .from("negotiations")
+      .update(updates)
+      .eq("id", negotiation.id)
+      .eq("owner_id", user.id);
+    if (updateError) throw updateError;
+  }
+}
+
 export async function deleteContact(id: string) {
   const supabase = createClient();
   const { error } = await supabase.from("negotiation_contacts").delete().eq("id", id);

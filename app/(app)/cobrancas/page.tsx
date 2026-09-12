@@ -17,7 +17,7 @@ import {
   deletePayment,
 } from "@/lib/services/charges";
 import { listAllClientsLite, updateClientPhone } from "@/lib/services/clients";
-import { listActiveNegotiationClientIds } from "@/lib/services/negotiations";
+import { listActiveNegotiationClientIds, logWhatsAppContact } from "@/lib/services/negotiations";
 import Link from "next/link";
 import {
   parseNegotiationsCSV,
@@ -379,6 +379,14 @@ return () => clearTimeout(t);
                 )}`}
                 target="_blank"
                 rel="noopener noreferrer"
+                onClick={() => {
+                  void logWhatsAppContact(
+                    c.client_id,
+                    `WhatsApp aberto pelo operador para cobrança de ${formatBRL(
+                      Number(c.amount) - (c.paid_total ?? 0)
+                    )}, vencimento em ${formatDate(c.due_date)}.`
+                  );
+                }}
               >
                 <Button
                   variant="ghost"
